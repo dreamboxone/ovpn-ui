@@ -38,9 +38,9 @@ It is based on [vpn-ui](https://github.com/Sir-MmD/vpn-ui), itself an extended [
 | Internet | Needed during install: strongSwan and the kernel modules come from the official OpenWrt feeds |
 | Architecture | ARMv7 (`arm_cortex-a*`), ARM64 (`aarch64_*`), `x86_64`. MIPS routers are not supported. |
 
-Check yours with `apk --print-arch`. Examples:
+Check yours with `grep DISTRIB_ARCH /etc/openwrt_release`. Examples:
 
-| `apk --print-arch` | Devices |
+| `DISTRIB_ARCH` | Devices |
 |---|---|
 | `arm_cortex-a7_neon-vfpv4` | ipq40xx: Google Wifi AC-1304, GL.iNet B1300, Linksys EA6350v3 |
 | `arm_cortex-a9_vfpv3-d16` | mvebu: Linksys WRT1900/3200ACM |

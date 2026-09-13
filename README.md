@@ -38,9 +38,9 @@
 | اینترنت | هنگام نصب لازم است. strongSwan و ماژول‌های کرنل از مخزن رسمی OpenWrt نصب می‌شوند. |
 | معماری | ARMv7 (`arm_cortex-a*`)، ARM64 (`aarch64_*`)، `x86_64`. روترهای MIPS پشتیبانی نمی‌شوند. |
 
-معماری روتر را با `apk --print-arch` ببینید. نمونه‌ها:
+معماری روتر را با `grep DISTRIB_ARCH /etc/openwrt_release` ببینید. نمونه‌ها:
 
-| `apk --print-arch` | دستگاه‌ها |
+| `DISTRIB_ARCH` | دستگاه‌ها |
 |---|---|
 | `arm_cortex-a7_neon-vfpv4` | ipq40xx: Google Wifi AC-1304، GL.iNet B1300، Linksys EA6350v3 |
 | `arm_cortex-a9_vfpv3-d16` | mvebu: Linksys WRT1900/3200ACM |

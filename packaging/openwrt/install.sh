@@ -8,7 +8,7 @@
 #
 #   sh install.sh /tmp/ovpn-ui-arm_cortex-a7_neon-vfpv4.apk
 #
-# It picks the package matching `apk --print-arch`, checks its sha256 against the
+# It picks the package for this router's architecture, checks its sha256 against the
 # release, installs it and prints the panel login. Nothing else on the router is
 # changed: no firewall rule is added, so the panel is reachable from the LAN only.
 #
@@ -31,7 +31,12 @@ case "$major" in
 	*) [ "$major" -ge 25 ] || die "OpenWrt 25.12 or newer is required (found $DISTRIB_RELEASE)" ;;
 esac
 
-arch="$(apk --print-arch)"
+# The OpenWrt package architecture (arm_cortex-a7_neon-vfpv4, aarch64_cortex-a53...),
+# which is what the packages are named and stamped with. NOT `apk --print-arch`: that
+# prints apk's own generic build arch ("armv7", "aarch64") on every target except x86_64.
+arch="${DISTRIB_ARCH:-}"
+[ -n "$arch" ] || arch="$(head -n1 /etc/apk/arch 2>/dev/null)"
+[ -n "$arch" ] || die "could not determine the package architecture (no DISTRIB_ARCH, no /etc/apk/arch)"
 echo "ovpn-ui: OpenWrt $DISTRIB_RELEASE, $arch"
 
 free_kb="$(df -k / | awk 'NR==2 {print $4}')"

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs once, on install or on the first boot after sysupgrade.
+/usr/lib/ovpn-ui/credentials.sh
+exit 0

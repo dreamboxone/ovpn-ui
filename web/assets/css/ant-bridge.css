@@ -1,0 +1,524 @@
+/*
+ * ant-bridge.css - makes ant-design-vue 1.7.8 look like the bento design.
+ *
+ * Load order: tokens.css -> custom.css -> components.css -> ant-bridge.css.
+ * Last, because it has to win over custom.css's inherited ant overrides.
+ *
+ * Why this file exists: 81% of the panel's markup is ant components (3,872
+ * <a-*> tags against 910 plain HTML), and over half the codebase is protocol
+ * config forms and modals - 686 a-form-item, 349 a-input, 301 a-select-option.
+ * Recomposing that markup would risk 1,371 i18n call sites for no visual gain.
+ * Restyling it through the token layer gets the same result and touches no
+ * template.
+ *
+ * The redesign's own primitives live in components.css and are `bo-` prefixed.
+ * This file only re-skins ant. It never introduces new layout.
+ *
+ * SCOPE - read this before touching the selector prefix.
+ *
+ * ant portals modals, drawers, dropdowns and popovers into document.body, as
+ * SIBLINGS of #app rather than descendants. custom.css proves it: it reaches
+ * them with sibling selectors like `.index-page~div .ant-backup-list-item`.
+ *
+ * So a `.bo-shell .ant-input` rule does NOT reach an input inside a modal, and
+ * the first cut of this file left every control in every popup (Add Inbound,
+ * client, WARP, logs) rendering as stock ant while the page behind it was
+ * restyled. The portal roots are therefore named explicitly in the scope.
+ *
+ * login.html is named too: it keeps its own chrome (waves hero, no rail) and
+ * never gets .bo-shell.
+ */
+
+/* ================================================================== *
+ * cards -> tiles
+ * ================================================================== */
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-md);
+  color:var(--text);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-head {
+  background:transparent;
+  border-bottom:1px solid var(--border);
+  color:var(--text-2);
+  font-weight:var(--fw-bold);
+  font-size:var(--fs-sm);
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  min-height:auto;
+  padding:14px 20px;
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-head-title { padding:0; }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-body { padding:18px 20px; color:var(--text); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-extra { padding:0; color:var(--text-2); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-hoverable:hover {
+  border-color:var(--border-strong);
+  box-shadow:var(--shadow-md);
+  transform:translateY(-2px);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-actions {
+  background:var(--surface-2);
+  border-top:1px solid var(--border);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-actions > li { color:var(--text-2); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-actions > li:not(:last-child) { border-inline-end:1px solid var(--border); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-card-actions > li > span:hover { color:var(--accent); }
+
+/* ================================================================== *
+ * tables
+ *
+ * The mockups contain no table at all - no <table>, <thead> or <tr> in either
+ * file, and no table primitive among bento's components. This is therefore
+ * designed here rather than ported, following bento's other surfaces: hairline
+ * borders, an uppercase letterspaced header matching .bo-tile-title, generous
+ * row padding, and a tinted rather than heavy hover.
+ * ================================================================== */
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table {
+  background:transparent;
+  color:var(--text);
+  font-size:var(--fs-sm);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-content,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-body { background:var(--surface); }
+
+/* Deliberately NOT uppercase with letter-spacing, unlike .bo-tile-title.
+   Table columns are narrow and ant sizes them from content, so the extra
+   tracking pushed headers like "Enabled" onto a second line mid-word. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-thead > tr > th {
+  background:var(--surface-2);
+  color:var(--text-3);
+  font-size:var(--fs-xs);
+  font-weight:var(--fw-bold);
+  letter-spacing:.01em;
+  white-space:nowrap;
+  border-bottom:1px solid var(--border);
+  padding:11px 14px;
+  transition:background var(--dur-fast) var(--ease);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-thead > tr > th .anticon-filter,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-thead > tr > th .ant-table-column-sorter { color:var(--text-3); }
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-tbody > tr > td {
+  border-bottom:1px solid var(--border);
+  padding:12px 14px;
+  transition:background var(--dur-fast) var(--ease);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-tbody > tr:last-child > td { border-bottom:none; }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-tbody > tr:hover > td,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-tbody > tr.ant-table-row-hover > td { background:var(--accent-weak); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-tbody > tr.ant-table-row-selected > td {
+  background:var(--accent-weak);
+}
+
+/* Expanded child rows (the nested client table on the inbounds page) sit on a
+   recessed surface so the nesting reads without an extra border. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-expanded-row > td,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-expanded-row:hover > td { background:var(--surface-2); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-row-expand-icon {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  color:var(--text-2);
+}
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-placeholder {
+  background:var(--surface);
+  border-top:1px solid var(--border);
+  border-bottom:none;
+  color:var(--text-3);
+}
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-table-pagination.ant-pagination { margin:16px 0 0; }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-pagination-item,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-pagination-prev .ant-pagination-item-link,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-pagination-next .ant-pagination-item-link {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-pagination-item a { color:var(--text-2); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-pagination-item-active { border-color:var(--accent); background:var(--accent-weak); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-pagination-item-active a { color:var(--accent); }
+
+/* ================================================================== *
+ * buttons
+ * ================================================================== */
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  color:var(--text-2);
+  font-weight:var(--fw-semibold);
+  box-shadow:none;
+  transition:background var(--dur-fast) var(--ease),
+             color var(--dur-fast) var(--ease),
+             border-color var(--dur-fast) var(--ease);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn:hover,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn:focus {
+  background:var(--accent-weak);
+  border-color:var(--accent);
+  color:var(--accent);
+}
+/* --accent-strong rather than --accent: white on the brand green is 4.46:1,
+   which misses WCAG AA. See tokens.css. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn-primary {
+  background:var(--accent-strong);
+  border-color:var(--accent-strong);
+  color:var(--on-accent);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn-primary:hover,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn-primary:focus {
+  background:var(--accent-strong);
+  border-color:var(--accent-strong);
+  color:var(--on-accent);
+  filter:brightness(1.08);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn-danger {
+  background:var(--error-weak);
+  border-color:var(--error);
+  color:var(--error);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn-danger:hover { background:var(--error); color:#fff; }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn-link { background:transparent; border-color:transparent; color:var(--accent); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn[disabled],
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-btn[disabled]:hover {
+  background:var(--surface-2); border-color:var(--border);
+  color:var(--text-3); opacity:.6;
+}
+
+/* ================================================================== *
+ * form controls
+ * ================================================================== */
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input-number,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-select-selection,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-time-picker-input,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-calendar-picker-input {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  color:var(--text);
+  box-shadow:none;
+  transition:border-color var(--dur-fast) var(--ease),
+             box-shadow var(--dur-fast) var(--ease);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input:hover,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input-number:hover,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-select-selection:hover { border-color:var(--border-strong); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input:focus,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input-number-focused,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-select-focused .ant-select-selection,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-select-open .ant-select-selection {
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px var(--accent-weak);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input::placeholder { color:var(--text-3); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-input-group-addon {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  color:var(--text-2);
+}
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-form-item-label > label { color:var(--text-2); font-weight:var(--fw-medium); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-form-item { margin-bottom:14px; }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-form-explain { color:var(--text-3); font-size:var(--fs-xs); }
+/* antd renders a field's description and its validation error in the same
+   .ant-form-explain slot, so the muted colour above (right for a description)
+   was also swallowing the errors: a message saying the form cannot be saved
+   read as a hint. Put the error colour back for fields actually in the error
+   state; has-error is only set by :validate-status="error". */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .has-error .ant-form-explain { color:var(--error); }
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-switch { background:var(--off); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-switch-checked { background:var(--accent-strong); }
+
+/* custom.css tints the unchecked box teal in dark mode
+   (rgb(0 135 113 / .3)), which reads as half-selected. Neutral surface with a
+   visible border, and an explicit radius so it stays a rounded square rather
+   than inheriting something round. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-checkbox-inner {
+  background:var(--surface);
+  border:1px solid var(--border-strong);
+  border-radius:4px;
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-radio-inner {
+  background:var(--surface);
+  border-color:var(--border-strong);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-checkbox-checked .ant-checkbox-inner {
+  background:var(--accent-strong);
+  border-color:var(--accent-strong);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-radio-checked .ant-radio-inner { border-color:var(--accent); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-radio-inner::after { background:var(--accent); }
+
+/* A plain radio's LABEL. antd hard-codes color:rgba(0,0,0,.65) on
+   .ant-radio-wrapper, and nothing overrode it, so those labels rendered
+   near-black on the dark and ultra-dark surfaces. The .ant-modal-content colour
+   further down reaches them only by inheritance, which a direct rule on the
+   nearer element beats - so it has to be stated here.
+   Radio BUTTONS are unaffected (custom.css themes .ant-radio-button-wrapper),
+   which is why only the two plain-radio dialogs in the panel were wrong: the
+   reseller delete prompt and the SSH outbound auth picker. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-radio-group,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-radio-wrapper { color:var(--text); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-radio-wrapper-disabled { color:var(--text-3); }
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-divider { background:var(--border); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-divider-horizontal.ant-divider-with-text-center { color:var(--text-2); }
+
+/* ================================================================== *
+ * tabs, collapse, alert, tag, badge
+ * ================================================================== */
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tabs-bar { border-bottom:1px solid var(--border); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tabs-nav .ant-tabs-tab { color:var(--text-2); font-weight:var(--fw-medium); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tabs-nav .ant-tabs-tab-active,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tabs-nav .ant-tabs-tab:hover { color:var(--accent); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tabs-ink-bar { background:var(--accent); }
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-collapse {
+  background:transparent;
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-collapse > .ant-collapse-item { border-bottom:1px solid var(--border); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-collapse > .ant-collapse-item:last-child { border-bottom:none; }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  color:var(--text); font-weight:var(--fw-semibold);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-collapse-content {
+  background:var(--surface);
+  border-top:1px solid var(--border);
+  color:var(--text);
+}
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert {
+  border-radius:var(--radius-lg);
+  border:1px solid var(--border);
+  background:var(--surface-2);
+  color:var(--text);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-error { background:var(--error-weak); border-color:var(--error); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-warning { background:var(--warn-weak); border-color:var(--warn); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-success { background:var(--ok-weak); border-color:var(--ok); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-info { background:var(--info-weak); border-color:var(--info); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-message { color:var(--text); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-description { color:var(--text-2); }
+/* The icon kept antd's own palette while the box around it moved to the tokens,
+   so a warning alert paired an amber icon with a token-coloured border and read
+   as two different design systems. Worst in light, where --warn is a dark olive. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-error .ant-alert-icon { color:var(--error); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-warning .ant-alert-icon { color:var(--warn); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-success .ant-alert-icon { color:var(--ok); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert-info .ant-alert-icon { color:var(--info); }
+
+/* Spacing for the no-TLS banner's permanent "don't show this again" action,
+   which sits on its own line under the description. margin-top rather than a
+   side margin, so RTL locales need no mirrored rule.
+   Colour is deliberately absent: the button keeps whatever the theme gives
+   every other secondary button (neutral in light, the green-tinted dark
+   variant from custom.css). An override here would only win in light mode,
+   which is worse than either look - it would make this the one control in the
+   panel that changes character between themes. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-alert .sec-alert-dismiss { margin-top:10px; }
+
+/*
+ * Tags. The colour budget for this whole panel is deliberately small:
+ * one brand accent, four reserved status hues, and neutral ink. Research and
+ * the dataviz method agree on the reason - "limit to 3-5 semantic colours;
+ * decorative colour adds noise without information", and "most data should be
+ * neutral so the important data stands out".
+ *
+ * Why protocol tags are NEUTRAL and not a rainbow:
+ *
+ * A tag renders its hue as small TEXT on a faint tint, so every hue must clear
+ * 4.5:1 against the surface. That pins them all into a narrow dark lightness
+ * band - and CVD separation is driven mostly by lightness difference. Running
+ * the dataviz validator with --pairs all (correct here: any two tags can sit
+ * side by side in a table) shows the collapse:
+ *
+ *     7 hues  worst pair dE 0.9  (olive vs amber, deuteranopia)
+ *     5 hues  worst pair dE 2.6  (rose vs green - the classic red/green case)
+ *     4 hues  worst pair dE 3.1  (purple vs blue)
+ *
+ * against a target of 8. No ordering fixes it; the constraint is structural.
+ * So hue cannot safely encode protocol identity here - and it does not need to,
+ * because the tag already spells the protocol name. Colouring it as well spends
+ * the identity channel re-encoding what the label already says.
+ *
+ * Decorative ant hues are therefore mapped to neutral. The status hues below
+ * keep their colour because they encode STATE, always beside a text label.
+ */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius-pill);
+  color:var(--text-2);
+  font-weight:var(--fw-semibold);
+  padding-inline:10px;
+}
+
+/* Decorative hues -> neutral. These are what turned every protocol, traffic
+   and duration cell on the inbounds page purple. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-purple,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-geekblue,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-cyan,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-magenta,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-pink,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-volcano,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-lime {
+  background:var(--surface-2);
+  border-color:var(--border);
+  color:var(--text-2);
+}
+
+/* Reserved status hues. Each is a state, never an identity. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-green,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-success {
+  background:var(--ok-weak); border-color:var(--ok); color:var(--ok);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-blue,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-processing {
+  background:var(--info-weak); border-color:var(--info); color:var(--info);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-red,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-error {
+  background:var(--error-weak); border-color:var(--error); color:var(--error);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-orange,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-warning,
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-gold {
+  background:var(--warn-weak); border-color:var(--warn); color:var(--warn);
+}
+
+/* color="#hex" emits an inline style that wins on its own; this only keeps the
+   shape consistent with the rest. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-tag-has-color { border-color:transparent; }
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-progress-bg { background:var(--accent); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-progress-text { color:var(--text-2); }
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-empty-description { color:var(--text-3); }
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .ant-spin-dot i { background:var(--accent); }
+
+/* ================================================================== *
+ * portaled overlays
+ *
+ * Modals, dropdowns, tooltips and popovers mount into document.body, outside
+ * .bo-shell, so they need their own scope. The panel already threads the theme
+ * class onto these via :overlay-class-name / :wrap-class-name; these rules
+ * attach to that same class so nothing new has to be wired up.
+ * ================================================================== */
+
+.ant-modal-content,
+.ant-modal-header,
+.dark .ant-modal-content,
+.light .ant-modal-content {
+  background:var(--surface);
+  color:var(--text);
+}
+.ant-modal-content { border-radius:var(--radius-xl); box-shadow:var(--shadow-md); }
+/* A width prop is a wish, not a promise.
+ *
+ * :width="820" writes an inline width onto .ant-modal, and antd only rescues it
+ * below 767px (its own max-width rule). Between there and ~880px the dialog is
+ * simply wider than the window: the inbound form's rail hangs off the left edge,
+ * where .ant-modal-wrap's horizontal scroll is the only way back to it. That is
+ * the "on a smaller browser window some parts cannot be reached" report, and it
+ * hits every panel modal wide enough to matter, not just that one.
+ *
+ * Capping it here rather than per dialog: a fixed pixel width can never be right
+ * for a window narrower than itself, whichever modal set it. Wide screens are
+ * untouched, since 820px is well inside 100vw - 16px there. */
+.ant-modal { max-width:calc(100vw - 16px); }
+/* And on a phone it starts at the top of the screen. antd's default 100px offset
+   is a desktop nicety: on a 640px-tall handset it spends a sixth of the window on
+   empty space above the dialog and pushes the footer - which is where Save is -
+   off the bottom. Dialogs that set their own `top` through :dialog-style are
+   untouched, since an inline style outranks this. */
+@media (max-width:640px) {
+  .ant-modal { top:8px; }
+}
+.ant-modal-header {
+  border-bottom:1px solid var(--border);
+  border-radius:var(--radius-xl) var(--radius-xl) 0 0;
+}
+.ant-modal-title { color:var(--text); font-weight:var(--fw-semibold); }
+.ant-modal-footer { border-top:1px solid var(--border); }
+.ant-modal-close-x { color:var(--text-3); }
+
+.ant-select-dropdown,
+.ant-dropdown-menu,
+.ant-popover-inner {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-md);
+}
+.ant-select-dropdown-menu-item,
+.ant-dropdown-menu-item { color:var(--text-2); }
+.ant-select-dropdown-menu-item-active:not(.ant-select-dropdown-menu-item-disabled),
+.ant-select-dropdown-menu-item:hover:not(.ant-select-dropdown-menu-item-disabled),
+.ant-dropdown-menu-item:hover {
+  background:var(--accent-weak);
+  color:var(--accent);
+}
+.ant-select-dropdown-menu-item-selected {
+  background:var(--accent-weak);
+  color:var(--accent);
+  font-weight:var(--fw-semibold);
+}
+.ant-popover-title { color:var(--text); border-bottom:1px solid var(--border); }
+.ant-popover-inner-content { color:var(--text-2); }
+.ant-tooltip-inner {
+  background:var(--surface-2);
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+}
+.ant-tooltip-arrow::before { background:var(--surface-2); }
+
+/* ================================================================== *
+ * protocol tags
+ *
+ * Two buckets: protocols served by the Xray core (blue) and every other VPN
+ * protocol (green).
+ *
+ * Deliberately NOT four families on the reserved status hues, which is what
+ * this was first. Painting the IPsec family with --warn meant a healthy IKEv2
+ * inbound wore the exact amber that means "stopped" on the Overview, so the
+ * colour had to be explained to be understood. Warn and error are never used
+ * for identity here now.
+ *
+ * The tag still spells the protocol name, so hue is a supporting cue rather
+ * than the only one - which is what keeps this legal despite the all-pairs CVD
+ * limit documented in the tag section above.
+ * ================================================================== */
+
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .bo-proto {
+  background:var(--surface-2); border-color:var(--border); color:var(--text-2);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .bo-proto--xray {
+  background:var(--info-weak); border-color:var(--info); color:var(--info);
+}
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .bo-proto--vpn {
+  background:var(--ok-weak); border-color:var(--ok); color:var(--ok);
+}
+/* An account served by NO inbound, in the column that otherwise holds one tag per
+ * inbound serving it. Drawn as an empty outline rather than in a status hue,
+ * because it belongs to the same family as the tags it stands in for and the rule
+ * above holds: identity never wears warn or error. The dash is what separates
+ * "nothing here, on purpose" from a protocol tag whose colour failed to load. The
+ * account's own lamp, two columns left, is where the status reading lives. */
+:is(.bo-shell,.login-app,.ant-modal,.ant-drawer,.ant-select-dropdown,.ant-dropdown,.ant-popover) .bo-proto--none {
+  background:transparent; border-style:dashed; border-color:var(--border-strong);
+  color:var(--text-3);
+}

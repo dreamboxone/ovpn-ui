@@ -1,0 +1,1047 @@
+{{ template "page/head_start" .}}
+<style>
+/* ====================================================================
+   Login: Tunnel. Ported from redesign/login/tunnel.html.
+
+   The ground is one generative graphic: traffic converging into a
+   protected conduit and out the far side. The form is a solid plate
+   laid over the waist of it.
+
+   This block is INLINE on purpose. head_start already pulls five global
+   stylesheets on every page of the panel and none of this is wanted on
+   any of the other six, so it must not become a sixth request. It also
+   replaces the old arrangement, where the login styling lived in the
+   global custom.css and shipped to every page that never used it.
+
+   There is deliberately no theme CSS here. tokens.css declares the
+   palette three times over (light at :root, dark at body.dark,
+   ultra-dark at html[data-theme='ultra-dark'] body.dark) and
+   aThemeSwitch drives which one is live, so consuming var(--x) inherits
+   all three themes for free.
+   ==================================================================== */
+
+/* The one token this page needs that tokens.css does not ship, declared
+   at the same three selectors so it themes like everything else. Values
+   are the mockup's. (The mockup also carried --bg-rgb; nothing in this
+   design reads it, because the card is deliberately opaque rather than a
+   translucent scrim. See the note above .lgt-card.) */
+:root { --shadow-lg:0 18px 40px -18px rgba(16,24,32,.22),0 4px 10px rgba(16,24,32,.06); }
+body.dark { --shadow-lg:0 20px 44px -22px rgba(0,0,0,.66); }
+html[data-theme='ultra-dark'] body.dark { --shadow-lg:0 20px 44px -22px rgba(0,0,0,.72); }
+
+/* The graphic is fixed to the viewport, so the ground colour has to be
+   on the body: anything the layout fails to cover would otherwise show
+   the browser's white. */
+body { background:var(--bg); }
+
+/* ===== scope ===== */
+#app.login-app, #app.login-app *, #app.login-app *::before, #app.login-app *::after { box-sizing:border-box; }
+#app.login-app {
+  position:relative; min-height:100vh; min-height:100dvh;
+  display:flex; flex-direction:column;
+  background:var(--bg); color:var(--text);
+  font-family:var(--font-sans); font-size:var(--fs-base); line-height:var(--lh-base);
+  -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  overflow-x:hidden;
+}
+/* color:inherit is not decoration. antd's reset paints every heading a fixed
+   rgba(0,0,0,.85), which the standalone mockup never met, and it wins over the
+   card's inherited --text: the greeting came out near-black on the dark plate. */
+#app.login-app h1, #app.login-app h2, #app.login-app p, #app.login-app ul { margin:0; padding:0; color:inherit; }
+#app.login-app button, #app.login-app input, #app.login-app select { font-family:inherit; font-size:inherit; }
+#app.login-app svg { display:block; }
+#app.login-app button:focus-visible,
+#app.login-app input:focus-visible,
+#app.login-app select:focus-visible,
+#app.login-app a:focus-visible {
+  outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--radius-sm);
+}
+
+#app.login-app .lgt-icon { width:16px; height:16px; flex:0 0 auto; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+#app.login-app .lgt-icon-14 { width:14px; height:14px; }
+#app.login-app .lgt-icon-18 { width:18px; height:18px; }
+
+/* ===== the ground ===== */
+#app.login-app .lgt-ground { position:fixed; inset:0; z-index:0; pointer-events:none; contain:layout paint; }
+#app.login-app .lgt-ground canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+/* ===== stage ===== */
+#app.login-app .lgt-main {
+  position:relative; z-index:1; flex:1 1 auto;
+  display:flex; align-items:center; justify-content:center;
+  padding:40px 20px;
+}
+#app.login-app .lgt-stage { position:relative; width:100%; max-width:412px; }
+
+/* The legibility guarantee is two independent things, in this order.
+   ONE: the card is solid --surface with a defined border, exactly the
+   plate every other panel surface uses. Nothing behind it shows through,
+   so the contrast of every string on this screen is identical to the
+   rest of the product, at every frame, whatever the animation is doing.
+   TWO (in script, see quiet()): the canvas simply does not paint in a
+   wide halo around the card, so the form also has room to breathe.
+   Two was deliberately NOT done as a translucent plate over the canvas:
+   an extra composited layer lands a level off the page colour and shows
+   up as a faint banded outline on a dark ground. Not painting is exact. */
+#app.login-app .lgt-card {
+  position:relative; z-index:1;
+  background:var(--surface); border:1px solid var(--border-strong);
+  border-radius:var(--radius-xl); box-shadow:var(--shadow-lg);
+  padding:24px;
+}
+@media (min-width:420px) { #app.login-app .lgt-card { padding:32px; } }
+
+#app.login-app .lgt-rise { animation:lgt-rise .4s cubic-bezier(.22,1,.36,1) both; }
+@keyframes lgt-rise { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+
+/* ===== card head ===== */
+#app.login-app .lgt-head { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+#app.login-app .lgt-brand {
+  font-size:var(--fs-lg); font-weight:var(--fw-bold); letter-spacing:.14em; color:var(--accent);
+  white-space:nowrap; direction:ltr; unicode-bidi:isolate;
+}
+#app.login-app .lgt-gear {
+  width:34px; height:34px; flex:0 0 auto; border-radius:var(--radius-pill);
+  border:1px solid var(--border); background:var(--surface-2); color:var(--text-2);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  transition:background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+#app.login-app .lgt-gear:hover,
+#app.login-app .lgt-gear[aria-expanded="true"] { background:var(--accent-weak); border-color:var(--accent); color:var(--accent); }
+
+/* ===== settings popover ===== */
+#app.login-app .lgt-pop-wrap { position:relative; }
+#app.login-app .lgt-pop {
+  position:absolute; z-index:6; top:calc(100% + 8px); inset-inline-end:0; width:252px;
+  background:var(--surface); border:1px solid var(--border-strong); border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-lg); padding:16px;
+  display:flex; flex-direction:column; gap:16px;
+}
+#app.login-app .lgt-pop-title {
+  font-size:var(--fs-xs); font-weight:var(--fw-bold); text-transform:uppercase; letter-spacing:.05em; color:var(--text-3);
+}
+#app.login-app .lgt-pop-group { display:flex; flex-direction:column; gap:8px; }
+/* the theme rows come from the shared a-theme-switch-login component, so
+   they arrive as ant markup rather than as this file's own controls */
+#app.login-app .lgt-pop-group .ant-space-item > span { font-size:var(--fs-sm); color:var(--text-2); }
+
+#app.login-app .lgt-select {
+  width:100%; padding:9px 10px; border-radius:var(--radius-md);
+  border:1px solid var(--border); background:var(--surface-2); color:var(--text);
+  font-size:var(--fs-sm); cursor:pointer;
+}
+#app.login-app .lgt-select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak); }
+
+/* ===== notices ===== */
+#app.login-app .lgt-alert {
+  display:flex; align-items:flex-start; gap:10px;
+  margin-top:16px; padding:10px 12px; border-radius:var(--radius-md);
+  font-size:var(--fs-sm); line-height:1.45;
+  background:var(--error-weak); color:var(--error);
+  border-inline-start:2px solid var(--error);
+}
+#app.login-app .lgt-alert .lgt-icon { margin-top:1px; }
+
+/* ===== greeting ===== */
+#app.login-app .lgt-greet { margin-top:24px; display:flex; flex-direction:column; gap:4px; }
+#app.login-app .lgt-eyebrow {
+  font-size:var(--fs-sm); font-weight:var(--fw-semibold); color:var(--text-3);
+  text-transform:uppercase; letter-spacing:.08em;
+}
+#app.login-app .lgt-title { font-size:var(--fs-xl); font-weight:var(--fw-bold); letter-spacing:-.01em; text-wrap:balance; }
+
+/* The fetch that gates the form is one round trip and usually lands
+   before the first paint is even visible, but reserving its height keeps
+   the card (and therefore the canvas quiet zone, which is measured from
+   the card) from resizing under the user when it does land. */
+#app.login-app .lgt-loading {
+  min-height:264px; display:flex; align-items:center; justify-content:center;
+}
+
+/* ===== form ===== */
+#app.login-app .lgt-form { margin-top:24px; display:flex; flex-direction:column; gap:16px; }
+#app.login-app .lgt-field { display:flex; flex-direction:column; gap:8px; }
+#app.login-app .lgt-label { font-size:var(--fs-sm); font-weight:var(--fw-semibold); color:var(--text-2); }
+#app.login-app .lgt-control {
+  display:flex; align-items:center; gap:10px;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);
+  padding-inline:12px;
+  transition:border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+#app.login-app .lgt-control > .lgt-icon { color:var(--text-3); }
+#app.login-app .lgt-control:focus-within {
+  background:var(--surface); border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-weak);
+}
+#app.login-app .lgt-control:focus-within > .lgt-icon { color:var(--accent); }
+#app.login-app .lgt-control.is-invalid { border-color:var(--error); }
+/* A rejected field that regains focus stays in the error colour. Without
+   these two, the :focus-within rules above win on source order and repaint
+   a still-invalid field with the accent ring, which reads as approval. */
+#app.login-app .lgt-control.is-invalid:focus-within {
+  border-color:var(--error); box-shadow:0 0 0 3px var(--error-weak);
+}
+#app.login-app .lgt-control.is-invalid:focus-within > .lgt-icon { color:var(--error); }
+#app.login-app .lgt-control input {
+  flex:1 1 auto; min-width:0; height:42px;
+  border:0; background:transparent; color:var(--text);
+  padding:0; outline:none;
+}
+#app.login-app .lgt-control input::placeholder { color:var(--text-3); opacity:1; }
+#app.login-app .lgt-reveal {
+  width:30px; height:30px; flex:0 0 auto; margin-inline-end:-4px;
+  border:0; border-radius:var(--radius-sm); background:transparent; color:var(--text-3);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  transition:color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+#app.login-app .lgt-reveal:hover { color:var(--accent); background:var(--accent-weak); }
+
+/* the code is a machine string: it stays LTR and monospaced in every locale */
+#app.login-app .lgt-code input {
+  font-family:var(--font-mono); font-size:var(--fs-md); letter-spacing:.34em;
+  direction:ltr; unicode-bidi:isolate; text-align:start;
+}
+#app.login-app .lgt-hint { font-size:var(--fs-xs); color:var(--text-3); line-height:1.45; }
+
+/* ===== submit ===== */
+#app.login-app .lgt-submit {
+  position:relative; width:100%; height:44px; margin-top:4px;
+  border:1px solid transparent; border-radius:var(--radius-md);
+  background:var(--accent-strong); color:var(--on-accent);
+  font-size:var(--fs-base); font-weight:var(--fw-semibold); letter-spacing:.01em; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:10px;
+  transition:filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+#app.login-app .lgt-submit:hover { filter:brightness(1.06); }
+#app.login-app .lgt-submit:active { transform:translateY(1px); }
+#app.login-app .lgt-submit[aria-busy="true"] { cursor:progress; filter:none; }
+#app.login-app .lgt-spin {
+  width:16px; height:16px; flex:0 0 auto; border-radius:50%;
+  border:2px solid currentColor; border-top-color:transparent; opacity:.9;
+  animation:lgt-spin .8s linear infinite;
+}
+@keyframes lgt-spin { to { transform:rotate(360deg); } }
+
+@media (max-width:400px) {
+  #app.login-app .lgt-main { padding:24px 12px; }
+  #app.login-app .lgt-title { font-size:var(--fs-lg); }
+}
+
+/* Reduced motion. The CSS half only covers transitions; the animation
+   loop itself is cancelled in script, it is not merely slowed. */
+@media (prefers-reduced-motion: reduce) {
+  #app.login-app *, #app.login-app *::before, #app.login-app *::after {
+    transition-duration:.001ms !important;
+    animation-duration:.001ms !important;
+    animation-iteration-count:1 !important;
+  }
+  #app.login-app .lgt-spin { animation:none; border-top-color:currentColor; opacity:.45; }
+}
+</style>
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+{{/*
+  Icon sprite. Kept outside #app so Vue never compiles it: <defs> has no
+  reactive content and a symbol id is cheaper to reference than to
+  re-render. This is the tunnel set only, not page/icon_sprite, which is
+  the 30-symbol shell sprite and mostly dead weight on this page.
+*/}}
+<svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true" focusable="false">
+<defs>
+<symbol id="lgt-i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M4.9 20.2a7.1 7.1 0 0 1 14.2 0"/></symbol>
+<symbol id="lgt-i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.4" width="15" height="9.8" rx="2.1"/><path d="M8.3 10.4V7.9a3.7 3.7 0 0 1 7.4 0v2.5"/></symbol>
+<symbol id="lgt-i-key" viewBox="0 0 24 24"><circle cx="7.6" cy="12" r="3.6"/><path d="M11.2 12h9.3"/><path d="M18.2 12v3.3"/><path d="M14.9 12v2.4"/></symbol>
+<symbol id="lgt-i-eye" viewBox="0 0 24 24"><path d="M2 12s3.8-7 10-7 10 7 10 7-3.8 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="lgt-i-eye-off" viewBox="0 0 24 24"><path d="M3.3 3.3l17.4 17.4"/><path d="M10.6 5.2A10.5 10.5 0 0 1 12 5c6.2 0 10 7 10 7a17.6 17.6 0 0 1-3.9 4.8"/><path d="M6.5 6.7C3.8 8.6 2 12 2 12s3.8 7 10 7c1.4 0 2.7-.3 3.9-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+<symbol id="lgt-i-sliders" viewBox="0 0 24 24"><line x1="5" y1="21" x2="5" y2="14"/><line x1="5" y1="10" x2="5" y2="3"/><circle cx="5" cy="12" r="2.1"/><line x1="12" y1="21" x2="12" y2="12.5"/><line x1="12" y1="8.5" x2="12" y2="3"/><circle cx="12" cy="10.5" r="2.1"/><line x1="19" y1="21" x2="19" y2="16"/><line x1="19" y1="12" x2="19" y2="3"/><circle cx="19" cy="14" r="2.1"/></symbol>
+<symbol id="lgt-i-alert" viewBox="0 0 24 24"><path d="M12 4.3 21 19.6H3z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.7" x2="12.01" y2="16.7"/></symbol>
+</defs>
+</svg>
+
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme + ' login-app'">
+
+  {{/*
+    The ground sits OUTSIDE the fetch gate below, so it is present from
+    the first paint and is never torn down and rebuilt: the canvases keep
+    their backing store, the shell is painted once, and the fetch landing
+    only moves the quiet zone.
+  */}}
+  <div class="lgt-ground" aria-hidden="true">
+    <canvas ref="shellCanvas"></canvas>
+    <canvas ref="flowCanvas"></canvas>
+  </div>
+
+  <main class="lgt-main">
+    <div class="lgt-stage" id="login">
+      <div class="lgt-card lgt-rise" ref="card">
+
+        <div class="lgt-head">
+          <p class="lgt-brand">[VPN-UI]</p>
+          <div class="lgt-pop-wrap">
+            <button type="button" class="lgt-gear" ref="gear" @click.stop="settingsOpen = !settingsOpen"
+              :aria-expanded="settingsOpen ? 'true' : 'false'" aria-controls="lgt-pop"
+              aria-label='{{ i18n "menu.settings" }}' title='{{ i18n "menu.settings" }}'>
+              <svg class="lgt-icon lgt-icon-18" aria-hidden="true"><use href="#lgt-i-sliders"></use></svg>
+            </button>
+            <div class="lgt-pop" id="lgt-pop" v-show="settingsOpen" @click.stop>
+              <div class="lgt-pop-group">
+                <p class="lgt-pop-title">{{ i18n "menu.settings" }}</p>
+                <a-theme-switch-login></a-theme-switch-login>
+              </div>
+              <div class="lgt-pop-group">
+                <label class="lgt-pop-title" for="lgt-lang">{{ i18n "pages.settings.language" }}</label>
+                <select class="lgt-select" id="lgt-lang" v-model="lang" @change="LanguageManager.setLanguage(lang)">
+                  <option v-for="l in LanguageManager.supportedLanguages" :key="l.value" :value="l.value"
+                    v-text="l.name + ' (' + l.value + ')'"></option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <template v-if="!loadingStates.fetched">
+          <div class="lgt-loading">
+            <a-spin size="large"></a-spin>
+          </div>
+        </template>
+        <template v-else>
+
+          <div class="lgt-greet">
+            <p class="lgt-eyebrow">{{ i18n "pages.login.hello" }}</p>
+            <h1 class="lgt-title">{{ i18n "pages.login.title" }}</h1>
+          </div>
+
+          {{/*
+            The server already answers in the caller's locale, so the
+            alert echoes its message rather than picking a string here:
+            "empty username", "invalid form data" and "wrong credentials"
+            are three different answers and only the server knows which.
+            HttpUtil also toasts it; the toast fades, this does not, and
+            it is what pairs with the red field borders.
+          */}}
+          <div class="lgt-alert" role="alert" v-if="loginError">
+            <svg class="lgt-icon lgt-icon-14" aria-hidden="true"><use href="#lgt-i-alert"></use></svg>
+            <span v-text="loginError"></span>
+          </div>
+
+          <form class="lgt-form" @submit.prevent="login" novalidate>
+
+            <div class="lgt-field">
+              <label class="lgt-label" for="lgt-user">{{ i18n "username" }}</label>
+              <div class="lgt-control" :class="{ 'is-invalid': loginError }">
+                <svg class="lgt-icon" aria-hidden="true"><use href="#lgt-i-user"></use></svg>
+                <input id="lgt-user" ref="username" name="username" type="text" autocomplete="username"
+                  v-model.trim="user.username" :aria-invalid="loginError ? 'true' : 'false'" required>
+              </div>
+            </div>
+
+            <div class="lgt-field">
+              <label class="lgt-label" for="lgt-pass">{{ i18n "password" }}</label>
+              <div class="lgt-control" :class="{ 'is-invalid': loginError }">
+                <svg class="lgt-icon" aria-hidden="true"><use href="#lgt-i-lock"></use></svg>
+                <input id="lgt-pass" name="password" :type="passwordVisible ? 'text' : 'password'"
+                  autocomplete="current-password" v-model.trim="user.password"
+                  :aria-invalid="loginError ? 'true' : 'false'" required>
+                <button type="button" class="lgt-reveal" @click="passwordVisible = !passwordVisible"
+                  :aria-pressed="passwordVisible ? 'true' : 'false'"
+                  :aria-label="passwordVisible ? t.hidePassword : t.showPassword"
+                  :title="passwordVisible ? t.hidePassword : t.showPassword">
+                  <svg class="lgt-icon" aria-hidden="true">
+                    <use :href="passwordVisible ? '#lgt-i-eye-off' : '#lgt-i-eye'"></use>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="lgt-field lgt-code" v-if="twoFactorEnable">
+              <label class="lgt-label" for="lgt-code">{{ i18n "twoFactorCode" }}</label>
+              <div class="lgt-control" :class="{ 'is-invalid': loginError }">
+                <svg class="lgt-icon" aria-hidden="true"><use href="#lgt-i-key"></use></svg>
+                <input id="lgt-code" name="twoFactorCode" type="text" autocomplete="one-time-code"
+                  inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000"
+                  aria-describedby="lgt-code-hint" v-model.trim="user.twoFactorCode"
+                  :aria-invalid="loginError ? 'true' : 'false'" required>
+              </div>
+              <p class="lgt-hint" id="lgt-code-hint">{{ i18n "pages.login.toasts.twoFactorRequired" }}</p>
+            </div>
+
+            <button type="submit" class="lgt-submit" :disabled="loadingStates.spinning"
+              :aria-busy="loadingStates.spinning ? 'true' : 'false'">
+              <span class="lgt-spin" v-if="loadingStates.spinning" aria-hidden="true"></span>
+              <span>{{ i18n "login" }}</span>
+            </button>
+
+          </form>
+        </template>
+
+      </div>
+    </div>
+  </main>
+</a-layout>
+{{template "page/body_scripts" .}}
+{{template "component/aThemeSwitch" .}}
+<script>
+  /* ==================================================================
+     The generative ground.
+
+     Performance budget, fixed up front. A login page can sit open for
+     hours on a phone, so none of these are tuned by feel:
+       - device pixel ratio capped at 1.5
+       - 30 frames a second, enforced by an accumulator
+       - particle count derived from width and hard capped
+       - the tunnel shell is drawn ONCE per resize onto its own canvas
+       - the loop is cancelled outright when the tab is hidden or when
+         the user prefers reduced motion
+
+     Two things differ from the standalone mockup, both because the
+     panel's theme system is not the mockup's:
+       - colours are read off <body>, not <html>. tokens.css declares the
+         dark and ultra-dark palettes at `body.dark`, so asking
+         documentElement for --accent always answers with the LIGHT one.
+       - there is no prefers-color-scheme branch. aThemeSwitch writes the
+         theme onto <body> before this runs and never follows the OS, so
+         the class on the body IS the answer.
+     ================================================================== */
+  function createGround(groundEl, shellCv, flowCv, cardEl) {
+    const shell = shellCv.getContext('2d');
+    const flow = flowCv.getContext('2d');
+    const motionQ = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    const DPR_CAP = 1.5;
+    const TARGET_FPS = 30;
+    const FRAME_MS = 1000 / TARGET_FPS;
+    const MAX_DOTS = 76;
+    const MIN_DOTS = 18;
+
+    let W = 0, H = 0, DPR = 1;
+    let dots = [];
+    let sprites = null;
+    let geo = null;
+    let rafId = 0, running = false, lastT = 0, acc = 0, clock = 0;
+    let profileAlpha = 0.86;
+
+    /* verification hook: read window.__lgtStats from devtools to see the
+       real cost of a frame. Nothing on the page reads or displays it. */
+    const stats = window.__lgtStats = { frames: 0, drawMs: 0, avgMs: 0, dots: 0, dpr: 1, fpsCap: TARGET_FPS, running: false };
+
+    /* ---- deterministic noise, so a screenshot is reproducible ---- */
+    function mulberry32(a) {
+      return function () {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        let t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+
+    /* ---- colour, read back from the live tokens ----
+       Read off <body>, NOT documentElement. tokens.css declares light at
+       :root but dark at `body.dark` and ultra-dark at
+       `html[data-theme='ultra-dark'] body.dark`, so asking the root
+       element for --accent answers with the light value in every theme
+       and the canvas would silently paint light colours on a dark page. */
+    function tokenRGB(name) {
+      const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+      if (v.charAt(0) === '#') {
+        if (v.length === 4) return [parseInt(v[1] + v[1], 16), parseInt(v[2] + v[2], 16), parseInt(v[3] + v[3], 16)];
+        return [parseInt(v.substr(1, 2), 16), parseInt(v.substr(3, 2), 16), parseInt(v.substr(5, 2), 16)];
+      }
+      const m = v.match(/(-?[\d.]+)\s*[, ]\s*(-?[\d.]+)\s*[, ]\s*(-?[\d.]+)/);
+      if (m) return [+m[1], +m[2], +m[3]];
+      return [128, 128, 128];
+    }
+    function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+    /* Which of the two rendering profiles below is correct, decided from
+       the panel's own theme signals rather than the mockup's.
+
+       The panel carries TWO independent flags, under two localStorage
+       keys: `dark-mode` puts class="dark" or "light" on <body>, and
+       `isUltraDarkThemeEnabled` puts data-theme="ultra-dark" on <html>.
+       They are not nested, so light + ultra-dark is reachable: turn ultra
+       on while dark, then turn dark off, and toggleTheme leaves the
+       data-theme attribute in place.
+
+       In that combination tokens.css applies the LIGHT palette, because
+       its ultra-dark block is `html[data-theme='ultra-dark'] body.dark`
+       and body is no longer .dark. So the class on the body is the whole
+       answer: it decides which palette is live, and ultra-dark is a
+       variant of dark rather than a third profile. prefers-color-scheme
+       is not consulted at all, because the panel never follows it. */
+    function isDarkGround() { return document.body.classList.contains('dark'); }
+
+    /* Two rendering profiles. A graphic tuned only for a dark ground turns
+       into grey smudge on #f4f6f8, so light gets its own: shorter marks, no
+       bloom, thinner walls held at a higher alpha to survive the pale bg. */
+    function profile() {
+      return isDarkGround()
+        ? { dot: 0.92, len: 1.00, wash: 0.030, wall: 0.22, bloom: 0.34 }
+        : { dot: 0.80, len: 0.86, wash: 0.030, wall: 0.38, bloom: 0.00 };
+    }
+
+    /* ---- geometry -------------------------------------------------
+       One horizontal conduit. It is wide and loose at the two ends and
+       pinches to a waist in the middle, where the form sits. Traffic
+       converges into it, disappears behind the plate, and comes out the
+       far side: the card is the protected segment.                    */
+    function measure() {
+      W = groundEl.clientWidth || window.innerWidth;
+      H = groundEl.clientHeight || window.innerHeight;
+      DPR = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+      stats.dpr = DPR;
+
+      const r = cardEl.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      let cy = r.top + r.height / 2;
+      cy = Math.max(H * 0.30, Math.min(H * 0.70, cy));
+
+      /* the mouths must clear the scrim halo, or the transition from
+         scattered to ordered happens where nobody can see it */
+      let mouth = Math.max(W * 0.28, r.width * 0.5 + 240);
+      mouth = Math.min(mouth, W * 0.46);
+      mouth = Math.max(mouth, 150);
+
+      const half = Math.min(Math.max(H * 0.22, 92), 198);
+
+      /* the quiet zone: the card rect, inflated, inside which the graphic
+         is simply not drawn. Feathered so it has no edge of its own. */
+      const pad = 26;
+      const feather = Math.min(126, Math.max(70, W * 0.09));
+
+      geo = {
+        cx: cx, cy: cy, mouth: mouth, half: half,
+        waist: 0.30, envMax: 1.55, reach: 1.62,
+        xMin: -W * 0.14, xMax: W * 1.14,
+        qx0: r.left - pad, qy0: r.top - pad, qx1: r.right + pad, qy1: r.bottom + pad,
+        qr: Math.min(44, r.width / 2), qf: feather
+      };
+    }
+
+    /* 0 inside the quiet zone, 1 once well clear of it */
+    function quiet(x, y) {
+      const dx = x < geo.qx0 ? geo.qx0 - x : (x > geo.qx1 ? x - geo.qx1 : 0);
+      const dy = y < geo.qy0 ? geo.qy0 - y : (y > geo.qy1 ? y - geo.qy1 : 0);
+      if (dx === 0 && dy === 0) return 0;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d >= geo.qf) return 1;
+      const t = d / geo.qf;
+      return t * t * (3 - 2 * t);
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function env(x) {
+      const u = Math.abs(x - geo.cx) / geo.mouth;
+      if (u <= 1) return geo.waist + (1 - geo.waist) * Math.pow(u, 1.55);
+      /* asymptotic past the mouth: the conduit opens out and settles,
+         it never runs off to the corners as a hard diagonal */
+      return 1 + (geo.envMax - 1) * (1 - Math.exp(-(u - 1)));
+    }
+    /* 1 at the waist, 0 at the mouth and beyond: how ordered the traffic is */
+    function order(x) {
+      const e = env(x);
+      const o = 1 - (e - geo.waist) / (1 - geo.waist);
+      return o < 0 ? 0 : (o > 1 ? 1 : o);
+    }
+    /* everything fades out well before the viewport edge, so the whole
+       graphic stays a pool of light around the form instead of a poster */
+    function haze(x) {
+      const u = Math.abs(x - geo.cx) / geo.mouth;
+      if (u <= 0.92) return 1;
+      const t = (u - 0.92) / (geo.reach - 0.92);
+      if (t >= 1) return 0;
+      return 1 - t * t * (3 - 2 * t);
+    }
+    /* the same falloff as a paintable gradient along x, sampled at eight
+       stops so the curve matches haze() rather than banding across it.
+       invert gives the complement, used once with destination-out. */
+    function hazeGradient(ctx, col, peak, invert) {
+      const span = geo.mouth * geo.reach;
+      const g = ctx.createLinearGradient(geo.cx - span, 0, geo.cx + span, 0);
+      const inner = (geo.reach - 0.92) / (geo.reach * 2);
+      for (let i = 0; i <= 8; i++) {
+        const f = i / 8;
+        const p = inner * f;
+        const h = 1 - (1 - f) * (1 - f) * (1 + 2 * f);   /* smoothstep, same as haze() */
+        const a = peak * (invert ? 1 - h : h);
+        g.addColorStop(p, rgba(col, a));
+        g.addColorStop(1 - p, rgba(col, a));
+      }
+      return g;
+    }
+
+    /* ---- packet sprites, pre-rendered once per theme ---- */
+    function makeSprite(col, right, p) {
+      const w = Math.round(30 * p.len), h = 13;
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(w * DPR));
+      c.height = Math.max(1, Math.round(h * DPR));
+      const g = c.getContext('2d');
+      g.scale(DPR, DPR);
+
+      const headX = right ? w * 0.80 : w * 0.20;
+      if (p.bloom > 0) {
+        const rg = g.createRadialGradient(headX, h / 2, 0, headX, h / 2, h * 0.62);
+        rg.addColorStop(0, rgba(col, p.bloom));
+        rg.addColorStop(1, rgba(col, 0));
+        g.fillStyle = rg;
+        g.fillRect(0, 0, w, h);
+      }
+
+      const lg = g.createLinearGradient(right ? 0 : w, 0, right ? w : 0, 0);
+      lg.addColorStop(0.00, rgba(col, 0));
+      lg.addColorStop(0.55, rgba(col, 0.30));
+      lg.addColorStop(1.00, rgba(col, 1));
+      g.fillStyle = lg;
+
+      const top = h / 2 - 2.1, bot = h / 2 + 2.1;
+      g.beginPath();
+      g.moveTo(0, h / 2);
+      g.quadraticCurveTo(w * 0.42, top, w, h / 2);
+      g.quadraticCurveTo(w * 0.42, bot, 0, h / 2);
+      g.closePath();
+      g.fill();
+
+      return { cv: c, w: w, h: h };
+    }
+
+    function buildSprites() {
+      const p = profile();
+      const accent = tokenRGB('--accent');
+      const info = tokenRGB('--info');
+      sprites = {
+        /* toward the server: the panel already reads upload as teal */
+        out: makeSprite(accent, true, p),
+        /* toward the client: and download as blue */
+        back: makeSprite(info, false, p)
+      };
+    }
+
+    /* ---- the static shell -----------------------------------------
+       Drawn once per resize onto its own canvas. Eight lane curves
+       squeezing into the waist and opening out again: the convergence
+       is what makes it read as a conduit rather than a stripe.      */
+    const LANE_LINES = [
+      { o: 1.00, w: 1.00 }, { o: 0.68, w: 0.60 }, { o: 0.38, w: 0.60 }, { o: 0.13, w: 0.32 }
+    ];
+
+    function laneCurve(ctx, mul) {
+      ctx.beginPath();
+      for (let x = -24, k = 0; x <= W + 24; x += 10, k++) {
+        const y = geo.cy + mul * env(x) * geo.half;
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    function paintShell() {
+      const p = profile();
+      const accent = tokenRGB('--accent');
+
+      shellCv.width = Math.max(1, Math.round(W * DPR));
+      shellCv.height = Math.max(1, Math.round(H * DPR));
+      shellCv.style.width = W + 'px';
+      shellCv.style.height = H + 'px';
+      shell.setTransform(DPR, 0, 0, DPR, 0, 0);
+      shell.clearRect(0, 0, W, H);
+
+      /* interior wash, vertically soft, then feathered along x so the
+         conduit is a pool of light and not a band across the poster */
+      const reachY = geo.half * geo.envMax;
+      const wash = shell.createLinearGradient(0, geo.cy - reachY, 0, geo.cy + reachY);
+      wash.addColorStop(0.00, rgba(accent, 0));
+      wash.addColorStop(0.50, rgba(accent, p.wash));
+      wash.addColorStop(1.00, rgba(accent, 0));
+
+      shell.beginPath();
+      let x, first = true;
+      for (x = -24; x <= W + 24; x += 10) {
+        const yt = geo.cy - env(x) * geo.half;
+        if (first) { shell.moveTo(x, yt); first = false; } else shell.lineTo(x, yt);
+      }
+      for (x = W + 24; x >= -24; x -= 10) {
+        shell.lineTo(x, geo.cy + env(x) * geo.half);
+      }
+      shell.closePath();
+      shell.fillStyle = wash;
+      shell.fill();
+
+      shell.globalCompositeOperation = 'destination-out';
+      shell.fillStyle = hazeGradient(shell, [0, 0, 0], 1, true);
+      shell.fillRect(0, 0, W, H);
+      shell.globalCompositeOperation = 'source-over';
+
+      /* lanes */
+      shell.lineWidth = 1;
+      LANE_LINES.forEach(function (l) {
+        shell.strokeStyle = hazeGradient(shell, accent, p.wall * l.w, false);
+        laneCurve(shell, -l.o);
+        laneCurve(shell, l.o);
+      });
+
+      /* and lift the quiet zone straight back out of it */
+      shell.save();
+      shell.globalCompositeOperation = 'destination-out';
+      shell.shadowColor = 'rgba(0,0,0,1)';
+      shell.shadowBlur = geo.qf;
+      shell.fillStyle = '#000';
+      roundRect(shell, geo.qx0, geo.qy0, geo.qx1 - geo.qx0, geo.qy1 - geo.qy0, geo.qr);
+      shell.fill();
+      shell.fill();
+      shell.restore();
+    }
+
+    /* ---- packets ---- */
+    const LANES = [-1, -0.68, -0.38, -0.13, 0.13, 0.38, 0.68, 1];
+
+    function dotTarget() {
+      let n = Math.round(W / 17);
+      if (n > MAX_DOTS) n = MAX_DOTS;
+      if (n < MIN_DOTS) n = MIN_DOTS;
+      return n;
+    }
+
+    function seed() {
+      const rand = mulberry32(0x51F3E7);
+      const n = dotTarget();
+      dots = [];
+      for (let i = 0; i < n; i++) {
+        dots.push({
+          x: geo.xMin + rand() * (geo.xMax - geo.xMin),
+          lane: LANES[i % LANES.length],
+          dir: (i % 2 === 0) ? 1 : -1,
+          v: 42 + rand() * 44,
+          sz: 0.72 + rand() * 0.46,
+          off: (rand() - 0.5) * 0.44,   /* how far it strays once outside */
+          wa: 4 + rand() * 10,
+          wf: 0.16 + rand() * 0.2,
+          ph: rand() * 6.283
+        });
+      }
+      stats.dots = dots.length;
+    }
+
+    function paintFlow(dt) {
+      flow.clearRect(0, 0, W, H);
+
+      for (let i = 0; i < dots.length; i++) {
+        const d = dots[i];
+        if (dt) {
+          d.x += d.dir * d.v * dt;
+          if (d.x > geo.xMax) d.x = geo.xMin;
+          else if (d.x < geo.xMin) d.x = geo.xMax;
+        }
+        const h = haze(d.x);
+        if (h <= 0.02) continue;
+
+        const o = order(d.x);
+        const e = env(d.x);
+        const stray = 1 - o * 0.92;
+        const y = geo.cy + d.lane * geo.half * e
+          + d.off * geo.half * e * stray
+          + Math.sin(clock * d.wf + d.ph) * d.wa * stray;
+        if (y < -40 || y > H + 40) continue;
+
+        const a = h * quiet(d.x, y) * (0.34 + 0.66 * o) * profileAlpha;
+        if (a <= 0.01) continue;
+
+        const s = (d.dir > 0) ? sprites.out : sprites.back;
+        const sw = s.w * d.sz * (0.78 + 0.36 * o);
+        const sh = s.h * d.sz;
+        flow.globalAlpha = a;
+        flow.drawImage(s.cv, d.x - sw / 2, y - sh / 2, sw, sh);
+      }
+      flow.globalAlpha = 1;
+    }
+
+    function sizeFlow() {
+      flowCv.width = Math.max(1, Math.round(W * DPR));
+      flowCv.height = Math.max(1, Math.round(H * DPR));
+      flowCv.style.width = W + 'px';
+      flowCv.style.height = H + 'px';
+      flow.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+
+    /* ---- loop ---- */
+    function frame(now) {
+      rafId = requestAnimationFrame(frame);
+      let delta = now - lastT;
+      lastT = now;
+      if (delta > 250) delta = FRAME_MS;   /* woke from a stall: do not jump */
+      acc += delta;
+      if (acc < FRAME_MS) return;
+      const dt = acc / 1000;
+      acc = 0;
+      clock += dt;
+
+      const t0 = performance.now();
+      paintFlow(dt);
+      const cost = performance.now() - t0;
+      stats.frames++;
+      stats.drawMs += cost;
+      stats.avgMs = +(stats.drawMs / stats.frames).toFixed(3);
+    }
+
+    function start() {
+      if (running || motionQ.matches || document.hidden) return;
+      running = true; stats.running = true;
+      lastT = performance.now(); acc = 0;
+      rafId = requestAnimationFrame(frame);
+    }
+    function stop() {
+      if (!running) return;
+      cancelAnimationFrame(rafId);
+      rafId = 0; running = false; stats.running = false;
+    }
+
+    /* ---- (re)build ---- */
+    function build() {
+      measure();
+      profileAlpha = profile().dot;
+      sizeFlow();
+      buildSprites();
+      paintShell();
+      if (dots.length !== dotTarget()) seed();
+      paintFlow(0);
+    }
+
+    let layoutPending = false;
+    function scheduleBuild() {
+      if (layoutPending) return;
+      layoutPending = true;
+      requestAnimationFrame(function () {
+        layoutPending = false;
+        build();
+      });
+    }
+
+    let resizeTimer = 0;
+    function onResize() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(build, 150);
+    }
+    window.addEventListener('resize', onResize);
+
+    const ro = window.ResizeObserver ? new ResizeObserver(scheduleBuild) : null;
+    if (ro) ro.observe(cardEl);
+
+    /* a hidden tab must cost nothing at all */
+    function onVisibility() {
+      if (document.hidden) stop(); else start();
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+
+    /* reduced motion cancels the loop, it does not merely shorten it */
+    function motionChanged() {
+      if (motionQ.matches) { stop(); build(); }
+      else start();
+    }
+    if (motionQ.addEventListener) motionQ.addEventListener('change', motionChanged);
+    else if (motionQ.addListener) motionQ.addListener(motionChanged);
+
+    build();
+    if (!motionQ.matches) start();
+
+    return {
+      scheduleBuild: scheduleBuild,
+      /* a theme swap changes every colour the sprites and the shell were
+         baked from, so both have to be re-read and repainted; the token
+         values are only reachable through getComputedStyle, which is why
+         nothing here can be driven off a CSS variable alone. */
+      repaintTheme: build,
+      destroy: function () {
+        stop();
+        clearTimeout(resizeTimer);
+        window.removeEventListener('resize', onResize);
+        document.removeEventListener('visibilitychange', onVisibility);
+        if (motionQ.removeEventListener) motionQ.removeEventListener('change', motionChanged);
+        else if (motionQ.removeListener) motionQ.removeListener(motionChanged);
+        if (ro) ro.disconnect();
+      }
+    };
+  }
+
+  let ground = null;
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    data: {
+      themeSwitcher,
+      LanguageManager,
+      loadingStates: { fetched: false, spinning: false },
+      user: { username: "", password: "", twoFactorCode: "" },
+      twoFactorEnable: false,
+      passwordVisible: false,
+      settingsOpen: false,
+      loginError: "",
+      lang: "",
+      // Strings needed inside a bound attribute, where the nested quotes of an
+      // inline i18n call would break the attribute itself. Note the call cannot
+      // be named with its own delimiters even in a comment: Go parses actions
+      // in comments too, so writing it out here would be a template error.
+      t: {
+        showPassword: '{{ i18n "pages.login.showPassword" }}',
+        hidePassword: '{{ i18n "pages.login.hidePassword" }}'
+      }
+    },
+    async mounted() {
+      this.lang = LanguageManager.getLanguage();
+      document.addEventListener('click', this.closeSettings);
+      document.addEventListener('keydown', this.onKeydown);
+      // The canvas lives in Vue-managed DOM, so it can only be measured once
+      // Vue has actually put it in the document.
+      this.$nextTick(() => {
+        ground = createGround(this.$el.querySelector('.lgt-ground'),
+          this.$refs.shellCanvas, this.$refs.flowCanvas, this.$refs.card);
+      });
+      this.twoFactorEnable = await this.getTwoFactorEnable();
+    },
+    beforeDestroy() {
+      document.removeEventListener('click', this.closeSettings);
+      document.removeEventListener('keydown', this.onKeydown);
+      if (ground) { ground.destroy(); ground = null; }
+    },
+    watch: {
+      // Every colour in the graphic is baked from a token read through
+      // getComputedStyle, so a theme swap has to repaint rather than restyle.
+      // Both of these are watched: currentTheme covers light/dark, and it does
+      // NOT change for ultra-dark (which stays 'dark' and only flips the
+      // data-theme attribute on <html>), so isUltra is a separate trigger.
+      'themeSwitcher.currentTheme'() { this.repaintGround(); },
+      'themeSwitcher.isUltra'() { this.repaintGround(); }
+    },
+    methods: {
+      repaintGround() {
+        this.$nextTick(() => { if (ground) ground.repaintTheme(); });
+      },
+      closeSettings() { this.settingsOpen = false; },
+      onKeydown(e) {
+        if (e.key === 'Escape' && this.settingsOpen) {
+          this.settingsOpen = false;
+          if (this.$refs.gear) this.$refs.gear.focus();
+        }
+      },
+      // Two-step. The code field stays hidden until the server says this account
+      // actually has a second factor, which it only says once the password checks
+      // out. Admins without 2FA never see it, and an unauthenticated caller cannot
+      // use the login form to probe which usernames exist or which have 2FA.
+      async login() {
+        this.loadingStates.spinning = true;
+        this.loginError = "";
+        const msg = await HttpUtil.post('/login', this.user);
+        if (msg.success) {
+          location.href = basePath + 'panel/';
+        } else if (msg.obj && msg.obj.twoFactorRequired) {
+          // Not a failure: the password was right and the account has 2FA.
+          this.twoFactorEnable = true;
+          this.$nextTick(() => {
+            const el = this.$el.querySelector('input[name="twoFactorCode"]');
+            if (el) el.focus();
+          });
+        } else {
+          this.loginError = msg.msg;
+        }
+        this.loadingStates.spinning = false;
+      },
+      async getTwoFactorEnable() {
+        const msg = await HttpUtil.post('/getTwoFactorEnable');
+        if (msg.success) {
+          this.twoFactorEnable = msg.obj;
+          this.loadingStates.fetched = true;
+          this.$nextTick(() => {
+            // autofocus cannot do this: the form is not in the document when the
+            // page is parsed, it arrives with this response.
+            if (this.$refs.username) this.$refs.username.focus();
+          });
+          return msg.obj;
+        }
+      }
+    },
+  });
+
+  const pm_input_selector = '.lgt-control input';
+  const pm_form_selector = 'form.lgt-form';
+  const pm_strip_props = [
+    'background',
+    'background-color',
+    'background-image',
+    'color'
+  ];
+
+  const pm_observed_forms = new WeakSet();
+
+  function pm_strip_inline(el) {
+    if (!el || el.nodeType !== 1 || !el.matches?.(pm_input_selector)) return;
+
+    let did_change = false;
+    for (const prop of pm_strip_props) {
+      if (el.style.getPropertyValue(prop)) {
+        el.style.removeProperty(prop);
+        did_change = true;
+      }
+    }
+
+    if (did_change && el.style.length === 0) {
+      el.removeAttribute('style');
+    }
+  }
+
+  function pm_attach_observer(form) {
+    if (pm_observed_forms.has(form)) return;
+    pm_observed_forms.add(form);
+
+    form.querySelectorAll(pm_input_selector).forEach(pm_strip_inline);
+
+    const pm_mo = new MutationObserver(mutations => {
+      for (const m of mutations) {
+        if (m.type === 'attributes') {
+          pm_strip_inline(m.target);
+        } else if (m.type === 'childList') {
+          for (const n of m.addedNodes) {
+            if (n.nodeType !== 1) continue;
+            if (n.matches?.(pm_input_selector)) pm_strip_inline(n);
+            n.querySelectorAll?.(pm_input_selector).forEach(pm_strip_inline);
+          }
+        }
+      }
+    });
+
+    pm_mo.observe(form, {
+      attributes: true,
+      attributeFilter: ['style'],
+      childList: true,
+      subtree: true
+    });
+  }
+
+  function pm_init() {
+    document.querySelectorAll(pm_form_selector).forEach(pm_attach_observer);
+    const pm_host = document.getElementById('login') || document.body;
+    const pm_wait_for_forms = new MutationObserver(mutations => {
+      for (const m of mutations) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          if (n.matches?.(pm_form_selector)) pm_attach_observer(n);
+          n.querySelectorAll?.(pm_form_selector).forEach(pm_attach_observer);
+        }
+      }
+    });
+    pm_wait_for_forms.observe(pm_host, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', pm_init, { once: true });
+  } else {
+    pm_init();
+  }
+</script>
+{{ template "page/body_end" .}}

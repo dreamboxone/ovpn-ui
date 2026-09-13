@@ -1,0 +1,205 @@
+{{define "modals/adminModal"}}
+<a-modal id="admin-modal" v-model="adminModal.visible" :title="adminModal.title" @ok="adminModal.ok"
+  :confirm-loading="adminModal.confirmLoading" :closable="true" :mask-closable="false"
+  :ok-text="adminModal.okText" cancel-text='{{ i18n "close" }}' :class="themeSwitcher.currentTheme">
+  <a-form :colon="false" :label-col="{ md: { span: 8 } }" :wrapper-col="{ md: { span: 14 } }">
+
+    <a-form-item label='{{ i18n "pages.admins.username" }}'>
+      <a-input v-model.trim="adminModal.admin.username" :disabled="adminModal.admin.isSuperAdmin && adminModal.isSelf"></a-input>
+    </a-form-item>
+
+    <a-form-item>
+      <template slot="label">
+        <a-tooltip v-if="adminModal.isEdit">
+          <template slot="title">{{ i18n "pages.admins.passwordUnchangedHint" }}</template>
+          {{ i18n "pages.admins.password" }}
+          <a-icon type="question-circle"></a-icon>
+        </a-tooltip>
+        <span v-else>{{ i18n "pages.admins.password" }}</span>
+      </template>
+      <a-input-password v-model="adminModal.admin.password"
+        :placeholder="adminModal.isEdit ? '{{ i18n "pages.admins.passwordUnchangedHint" }}' : ''"></a-input-password>
+    </a-form-item>
+
+    <a-form-item label='{{ i18n "pages.admins.nickname" }}'>
+      <a-input v-model.trim="adminModal.admin.nickname"></a-input>
+    </a-form-item>
+
+    <a-form-item label='{{ i18n "enable" }}'>
+      <a-switch v-model="adminModal.admin.enable" :disabled="adminModal.isSelf"></a-switch>
+    </a-form-item>
+
+    <a-form-item>
+      <template slot="label">
+        <a-tooltip>
+          <template slot="title">{{ i18n "pages.admins.superAdminDesc" }}</template>
+          {{ i18n "pages.admins.superAdmin" }}
+          <a-icon type="question-circle"></a-icon>
+        </a-tooltip>
+      </template>
+      <!-- Editing yourself cannot drop your own super admin role or disable your own
+           account: the server refuses it too, but disabling it here explains why. -->
+      <a-switch v-model="adminModal.admin.isSuperAdmin" :disabled="adminModal.isSelf"></a-switch>
+    </a-form-item>
+
+
+
+    <!-- Which inbounds this admin can see. Anything unticked does not exist for them:
+         not in their list, and every route that names it answers not-found. A super
+         admin sees everything by role, so a checklist would imply a limit that is
+         not there. -->
+    <a-form-item v-if="!adminModal.admin.isSuperAdmin">
+      <template slot="label">
+        <a-tooltip>
+          <template slot="title">{{ i18n "pages.admins.inboundAccessDesc" }}</template>
+          {{ i18n "pages.admins.inboundAccess" }}
+          <a-icon type="question-circle"></a-icon>
+        </a-tooltip>
+      </template>
+      <a-alert v-if="!adminModal.allInbounds.length" type="info" show-icon
+        message='{{ i18n "pages.admins.noInbounds" }}'></a-alert>
+      <template v-else>
+        <a-checkbox :checked="adminModal.allChecked" :indeterminate="adminModal.someChecked"
+          @change="adminModal.toggleAll">
+          <span :style="{ fontWeight: 500 }">{{ i18n "pages.admins.selectAllInbounds" }}</span>
+        </a-checkbox>
+        <a-divider :style="{ margin: '8px 0' }"></a-divider>
+        <div :style="{ maxHeight: '180px', overflowY: 'auto' }">
+          <a-checkbox-group v-model="adminModal.admin.inboundIds" :style="{ width: '100%' }">
+            <a-row>
+              <a-col :span="24" v-for="ib in adminModal.allInbounds" :key="ib.id">
+                <a-checkbox :value="ib.id">
+                  [[ ib.remark || ('#' + ib.id) ]]
+                  <a-tag :style="{ marginLeft: '4px' }">[[ ib.protocol ]]</a-tag>
+                  <span :style="{ color: '#8c8c8c' }">:[[ ib.port ]]</span>
+                </a-checkbox>
+              </a-col>
+            </a-row>
+          </a-checkbox-group>
+        </div>
+      </template>
+    </a-form-item>
+
+    <!-- A super admin bypasses the mask entirely, so offering checkboxes would imply
+         a limit that does not exist. -->
+    <a-form-item v-if="!adminModal.admin.isSuperAdmin" label='{{ i18n "pages.admins.permissions" }}'>
+      <a-checkbox-group v-model="adminModal.admin.permissions" :style="{ width: '100%' }">
+        <a-row>
+          <a-col :span="24" v-for="slug in adminModal.allPermissions" :key="slug">
+            <a-checkbox :value="slug">[[ adminModal.permLabel(slug) ]]</a-checkbox>
+          </a-col>
+        </a-row>
+      </a-checkbox-group>
+    </a-form-item>
+  </a-form>
+</a-modal>
+
+<script>
+  // Labels for the permission slugs the server publishes. Keyed by slug so the
+  // server stays the source of truth for WHICH permissions exist; this only names
+  // them. An unknown slug falls back to the raw slug rather than rendering blank.
+  const PERMISSION_LABELS = {
+    accessInbounds: '{{ i18n "pages.admins.accessInbounds" }}',
+    createInbound: '{{ i18n "pages.admins.createInbound" }}',
+    editInbound: '{{ i18n "pages.admins.editInbound" }}',
+    deleteInbound: '{{ i18n "pages.admins.deleteInbound" }}',
+    createClient: '{{ i18n "pages.admins.createClient" }}',
+    editClient: '{{ i18n "pages.admins.editClient" }}',
+    deleteClient: '{{ i18n "pages.admins.deleteClient" }}',
+    bulkOperation: '{{ i18n "pages.admins.bulkOperation" }}',
+    accessCoreSettings: '{{ i18n "pages.admins.accessCoreSettings" }}',
+    accessXraySettings: '{{ i18n "pages.admins.accessXraySettings" }}',
+    accessPanelSettings: '{{ i18n "pages.admins.accessPanelSettings" }}',
+    manageResellers: '{{ i18n "pages.admins.manageResellers" }}',
+    accessOverview: '{{ i18n "pages.admins.accessOverview" }}',
+    manageOverview: '{{ i18n "pages.admins.manageOverview" }}',
+  };
+
+  const adminModal = {
+    title: '',
+    visible: false,
+    confirmLoading: false,
+    okText: '{{ i18n "sure" }}',
+    isEdit: false,
+    isSelf: false,
+    confirm: null,
+    allPermissions: [],
+    allInbounds: [],
+    admin: { id: 0, username: '', password: '', nickname: '', enable: true, isSuperAdmin: false, permissions: [], inboundIds: [] },
+
+    permLabel(slug) {
+      return PERMISSION_LABELS[slug] || slug;
+    },
+    get allChecked() {
+      return adminModal.allInbounds.length > 0 &&
+        adminModal.admin.inboundIds.length === adminModal.allInbounds.length;
+    },
+    get someChecked() {
+      const n = adminModal.admin.inboundIds.length;
+      return n > 0 && n < adminModal.allInbounds.length;
+    },
+    toggleAll(e) {
+      adminModal.admin.inboundIds = e.target.checked
+        ? adminModal.allInbounds.map(ib => ib.id)
+        : [];
+    },
+    ok() {
+      ObjectUtil.execute(adminModal.confirm, adminModal.admin);
+    },
+    show({ title = '', okText = '{{ i18n "sure" }}', admin = null, allPermissions = [], allInbounds = [], confirm = () => { }, isEdit = false }) {
+      this.title = title;
+      this.okText = okText;
+      this.confirm = confirm;
+      this.isEdit = isEdit;
+      this.allPermissions = allPermissions;
+      this.allInbounds = allInbounds;
+      if (isEdit && admin) {
+        this.admin = {
+          id: admin.id,
+          username: admin.username,
+          password: '', // blank means "keep the current one"
+          nickname: admin.nickname || '',
+          enable: admin.enable,
+          isSuperAdmin: admin.isSuperAdmin,
+          permissions: (admin.permissions || []).slice(),
+          inboundIds: (admin.inboundIds || []).slice(),
+        };
+      } else {
+        this.admin = { id: 0, username: '', password: '', nickname: '', enable: true, isSuperAdmin: false, permissions: [], inboundIds: [] };
+      }
+      this.isSelf = isEdit && admin && admin.id === app.currentAdminId;
+      this.visible = true;
+    },
+    // Bodies are form-urlencoded (a global axios interceptor Qs.stringify's them),
+    // and Qs emits an array as repeated keys, which is what Gin binds into []string.
+    // An empty array must still be sent as an explicit empty key, or removing every
+    // permission would omit the field and leave the old mask in place.
+    toPayload(admin) {
+      return {
+        username: admin.username,
+        password: admin.password,
+        nickname: admin.nickname,
+        enable: admin.enable,
+        isSuperAdmin: admin.isSuperAdmin,
+        permissions: admin.isSuperAdmin ? [] : (admin.permissions.length ? admin.permissions : ['']),
+        // A blank entry is how "none" is sent: an omitted key binds as nil server-side
+        // and cannot be told apart from "leave the existing grants alone".
+        inboundIds: admin.isSuperAdmin ? [''] : (admin.inboundIds.length ? admin.inboundIds : ['']),
+      };
+    },
+    close() {
+      adminModal.visible = false;
+      adminModal.loading(false);
+    },
+    loading(loading = true) {
+      adminModal.confirmLoading = loading;
+    },
+  };
+
+  new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#admin-modal',
+    data: { adminModal: adminModal },
+  });
+</script>
+{{end}}

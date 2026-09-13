@@ -1,0 +1,1276 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+{{template "page/shell_start" . }}
+      <a-spin :spinning="spinning" :delay="300" tip='{{ i18n "loading"}}' size="large">
+        <transition name="list" appear>
+          <a-row :gutter="[16, 16]" :style="{ margin: 0 }">
+            <a-col :span="24">
+
+              <!-- The account-centric view, and the only place clients are managed.
+                   The Inbounds page answers "what is serving traffic"; this one
+                   answers "who exists", which stopped being the same question once
+                   one account could be on several inbounds. Every write goes back
+                   through the inbounds client routes with an inboundIds set, so
+                   there is still one write path. -->
+              <a-card hoverable :style="{ marginBottom: '16px' }">
+                <div :style="{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }">
+                  <a-button type="primary" icon="plus" @click="openAdd()">
+                    {{ i18n "pages.clients.add" }}
+                  </a-button>
+
+                  <!-- One button, no menu. The inbounds are picked INSIDE the form,
+                       on the same checklist the single-client form uses, so a bulk
+                       add is the same act as a single add repeated - including
+                       landing the batch on several inbounds at once, which the
+                       pick-first menu could never express. -->
+                  <a-button icon="usergroup-add" v-if="assignable.length"
+                    @click="openBulkAdd()">{{ i18n "pages.client.bulk" }}</a-button>
+
+                  <!-- Row density. Reads as a toggle rather than a button because
+                       it is one: primary while compact is on. -->
+                  <a-tooltip>
+                    <template slot="title">
+                      [[ density === 'compact' ? '{{ i18n "pages.clients.roomier" }}'
+                                              : '{{ i18n "pages.clients.denser" }}' ]]
+                    </template>
+                    <a-button icon="column-height" @click="toggleDensity()"
+                      :type="density === 'compact' ? 'primary' : 'default'"></a-button>
+                  </a-tooltip>
+
+                  <a-button-group>
+                    <a-button icon="sync" @click="manualRefresh" :loading="refreshing"></a-button>
+                    <a-popover placement="bottomRight" trigger="click"
+                      :overlay-class-name="themeSwitcher.currentTheme">
+                      <template #title>
+                        <div class="ant-custom-popover-title">
+                          <a-switch v-model="isRefreshEnabled"
+                            @change="toggleRefresh" size="small"></a-switch>
+                          <span>{{ i18n "pages.inbounds.autoRefresh" }}</span>
+                        </div>
+                      </template>
+                      <template #content>
+                        <a-space direction="vertical">
+                          <span>{{ i18n "pages.inbounds.autoRefreshInterval" }}</span>
+                          <a-select v-model="refreshInterval"
+                            :disabled="!isRefreshEnabled"
+                            :style="{ width: '100%' }"
+                            @change="changeRefreshInterval"
+                            :dropdown-class-name="themeSwitcher.currentTheme">
+                            <a-select-option v-for="key in [5,10,30,60]"
+                              :value="key*1000">[[ key ]]s</a-select-option>
+                          </a-select>
+                        </a-space>
+                      </template>
+                      <a-button icon="down"></a-button>
+                    </a-popover>
+                  </a-button-group>
+
+                  <!-- The order. The only sort control on the page: none of these
+                       five is a column, so there are no header arrows to compete
+                       with. The button keeps a fixed label and the menu carries the
+                       tick, because the chosen ordering is a state of the LIST and
+                       reads better beside the other items than as a button that
+                       renames itself.
+                       :trigger="['click']" for the same reason as the row menu: an
+                       a-dropdown opens on HOVER by default. -->
+                  <a-dropdown :trigger="['click']">
+                    <a-button icon="sort-ascending">
+                      {{ i18n "pages.clients.sortBy" }}
+                    </a-button>
+                    <a-menu slot="overlay" :class="themeSwitcher.currentTheme"
+                      :selected-keys="[sortKey]" @click="e => pickSort(e.key)">
+                      <a-menu-item v-for="o in sortOptions" :key="o.key">
+                        [[ o.label ]]
+                      </a-menu-item>
+                    </a-menu>
+                  </a-dropdown>
+
+                  <a-dropdown>
+                    <a-button icon="ellipsis"></a-button>
+                    <a-menu slot="overlay" :class="themeSwitcher.currentTheme"
+                      @click="e => clickPageAction(e)">
+                      <!-- Refused for a reseller: it cannot be narrowed to the
+                           accounts they own, so it would clear an admin's counters
+                           too. The depleted sweep below IS theirs: it is scoped to
+                           their own accounts and refunds each one. -->
+                      <a-menu-item key="resetClients" v-if="!RESELLER.isReseller">
+                        <a-icon type="file-done"></a-icon>
+                        {{ i18n "pages.inbounds.resetAllClientTraffics" }}
+                      </a-menu-item>
+                      <a-menu-item key="delDepletedClients" :style="{ color: 'var(--error)' }">
+                        <a-icon type="rest"></a-icon>
+                        {{ i18n "pages.inbounds.delDepletedClients" }}
+                      </a-menu-item>
+                    </a-menu>
+                  </a-dropdown>
+
+                  <a-input-search
+                    v-model="search"
+                    placeholder='{{ i18n "pages.clients.searchPlaceholder" }}'
+                    :style="{ maxWidth: '280px' }"
+                    allow-clear
+                    @search="onSearch"
+                    @change="onSearchChange"></a-input-search>
+                </div>
+
+                <!-- Appears only with a selection, so the toolbar is not a row of
+                     permanently greyed buttons. -->
+                <a-alert v-if="selectedEmails.length" type="info" :show-icon="false"
+                  :class="themeSwitcher.currentTheme"
+                  :style="{ padding: '4px 10px', marginTop: '10px' }">
+                  <template slot="message">
+                    <a-space :size="8" wrap>
+                      <span><b>[[ selectedEmails.length ]]</b> {{ i18n "pages.clients.selected" }}</span>
+                      <a-button size="small" type="primary" icon="tool"
+                        @click="openBulkOps()">{{ i18n "pages.inbounds.bulkOperations" }}</a-button>
+                      <a-button size="small" icon="file-text"
+                        @click="exportSelectedTxt()">{{ i18n "pages.inbounds.exportTxt" }}</a-button>
+                      <a-button size="small" icon="file-pdf"
+                        @click="exportSelectedPdf()">{{ i18n "pages.inbounds.exportPdf" }}</a-button>
+                      <a-button size="small" icon="close"
+                        @click="clearSelection()">{{ i18n "pages.inbounds.clearSelection" }}</a-button>
+                    </a-space>
+                  </template>
+                </a-alert>
+              </a-card>
+
+              <a-card hoverable class="bo-lg" :class="{ 'bo-lg--compact': density === 'compact' }">
+                <a-table
+                  :columns="columns"
+                  :data-source="clients"
+                  :row-key="r => r.email"
+                  :row-selection="{ selectedRowKeys: selectedEmails, onChange: onSelectChange }"
+                  :pagination="pagination"
+                  :scroll="{ x: 1100 }"
+                  :expanded-row-keys="expandedRowKeys"
+                  v-on="{ expandedRowsChange: keys => { expandedRowKeys = keys; } }"
+                  @change="onTableChange"
+                  size="middle">
+
+                  <!-- One lamp for the whole account state. It replaced a badge, a
+                       Frozen tag and a comment span competing for the same line;
+                       the label it used to spell out lives in its tooltip, which is
+                       where a glyph's meaning belongs when the glyph is in a column
+                       of twelve identical ones. -->
+                  <template slot="accountCol" slot-scope="text, row">
+                    <div class="bo-lg-who">
+                      <a-tooltip>
+                        <template slot="title">[[ stateLabel(row) ]]</template>
+                        <span class="bo-lamp" :class="lampClass(row)"></span>
+                      </a-tooltip>
+                      <div class="bo-lg-names">
+                        <div class="bo-lg-name">[[ row.email ]]</div>
+                        <div class="bo-lg-note" v-if="row.comment" :title="row.comment">[[ row.comment ]]</div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- One account, one quota, however many inbounds serve it. That
+                       is the whole point of the accounts layer, so the figure is the
+                       account's and not a per-inbound one. Figures first, bar
+                       second: the bar answers "roughly how far", the numbers answer
+                       the question anyone actually asks. -->
+                  <template slot="dataCol" slot-scope="text, row">
+                    <div class="bo-lg-figs">
+                      <b>[[ sizeFormat(row.up + row.down) ]]</b>
+                      <template v-if="row.totalGB > 0"> / [[ sizeFormat(row.totalGB) ]]</template>
+                      <template v-else> / <span class="tr-infinity-ch">&infin;</span></template>
+                    </div>
+                    <div class="bo-meter" :class="meterClass(row)">
+                      <i v-if="row.totalGB > 0" :style="{ width: usedPercent(row) + '%' }"></i>
+                    </div>
+                  </template>
+
+                  <!-- Three different things wear this one field: a deadline, a
+                       countdown that has not started, and nothing at all. Each has
+                       to READ as what it is, which a single tag could not do. -->
+                  <template slot="expiresCol" slot-scope="text, row">
+                    <div class="bo-lg-rel" :class="expiryView(row).toneClass">[[ expiryView(row).rel ]]</div>
+                    <div class="bo-lg-abs" v-if="expiryView(row).abs">[[ expiryView(row).abs ]]</div>
+                  </template>
+
+                  <!-- Capped, with the rest behind a +N. An account on six inbounds
+                       used to wrap this cell onto three lines and push every row
+                       below it down. -->
+                  <template slot="servingCol" slot-scope="text, row">
+                    <div class="bo-lg-serving">
+                      <!-- A tag rather than the dim text this used to be. The cell is
+                           otherwise a row of protocol tags, so grey words in the gap
+                           where they should be read as a rendering failure; an account
+                           on no inbound is a state someone chose, and it is the one
+                           row on the page that is serving nobody. The tooltip carries
+                           the consequence, since the tag only has room for the fact. -->
+                      <a-tooltip v-if="!row.memberships || !row.memberships.length">
+                        <template slot="title">{{ i18n "pages.clients.noInboundsHint" }}</template>
+                        <a-tag class="bo-proto bo-proto--none">
+                          {{ i18n "pages.clients.noInbounds" }}
+                        </a-tag>
+                      </a-tooltip>
+                      <a-tooltip v-for="m in shownMemberships(row)" :key="m.inboundId">
+                        <template slot="title">
+                          [[ m.remark || ('#' + m.inboundId) ]]
+                          <span v-if="!m.enable"> &middot; {{ i18n "disabled" }}</span>
+                        </template>
+                        <a-tag class="bo-proto" :class="'bo-proto--' + protocolFamily(m.protocol)">
+                          [[ ProtocolLabels[m.protocol] || m.protocol ]]<span class="bo-lg-port">:[[ m.port ]]</span>
+                        </a-tag>
+                      </a-tooltip>
+                      <a-tooltip v-if="hiddenMemberships(row).length">
+                        <template slot="title">
+                          <div v-for="m in hiddenMemberships(row)" :key="m.inboundId">
+                            [[ m.remark || ('#' + m.inboundId) ]] ([[ m.protocol ]]:[[ m.port ]])
+                          </div>
+                        </template>
+                        <a-tag class="bo-proto">+[[ hiddenMemberships(row).length ]]</a-tag>
+                      </a-tooltip>
+                    </div>
+                  </template>
+
+                  <template slot="seenCol" slot-scope="text, row">
+                    <span class="bo-lg-seen" :class="{ 'bo-lg-seen--live': isClientOnline(row.email) }">
+                      [[ lastSeen(row) ]]
+                    </span>
+                  </template>
+
+                  <!-- Account-level only, and two controls rather than five. Enable
+                       stays out because it is the one an operator reaches for
+                       without reading, and because its state has to be VISIBLE from
+                       the row; the rest are deliberate acts and read better as named
+                       menu items than as five icons nobody can tell apart.
+                       :trigger="['click']" is not optional - an a-dropdown opens on
+                       HOVER by default, which inside a table means a menu opening
+                       every time the pointer crosses a row. -->
+                  <template slot="rowCol" slot-scope="text, row">
+                    <div class="bo-lg-acts">
+                      <a-tooltip>
+                        <template slot="title">{{ i18n "pages.inbounds.enable" }}</template>
+                        <a-switch size="small" :checked="!!row.enable"
+                          @change="v => toggleEnable(row, v)"></a-switch>
+                      </a-tooltip>
+                      <!-- The whole account in one panel: its subscription, its
+                           health, and every inbound serving it with whatever that
+                           protocol actually gives the customer. Distinct from the
+                           info-circle inside the expander, which speaks for ONE
+                           membership. Left of the menu because it only reads. -->
+                      <a-tooltip>
+                        <template slot="title">{{ i18n "pages.clients.accountInfo" }}</template>
+                        <a-button size="small" icon="info-circle"
+                          @click="showAccountInfo(row)"></a-button>
+                      </a-tooltip>
+                      <a-dropdown :trigger="['click']">
+                        <a-button size="small" icon="more" @click="e => e.preventDefault()"></a-button>
+                        <a-menu slot="overlay" :theme="themeSwitcher.currentTheme"
+                          @click="e => rowAction(e.key, row)">
+                          <a-menu-item key="edit">
+                            <a-icon type="edit"></a-icon>{{ i18n "edit" }}
+                          </a-menu-item>
+                          <!-- The account's subscription, which already covers every
+                               inbound serving it: one subId is projected onto all of
+                               them. Absent rather than disabled when there is none. -->
+                          <a-menu-item key="sub" v-if="subSettings.enable && row.subId">
+                            <a-icon type="link"></a-icon>{{ i18n "pages.settings.subSettings" }}
+                          </a-menu-item>
+                          <!-- The whole account, one card per inbound serving it.
+                               The icons inside the expander export ONE membership;
+                               these two are the row's, so they carry every protocol
+                               the customer was sold.
+                               Absent on an account no inbound serves, along with the
+                               two below it: all four are addressed to a membership
+                               (the exports render one card per inbound, reset and
+                               freeze post to /:id/... routes), so with none they are
+                               menu items that quietly do nothing. Edit and Delete
+                               stay, and they are the two that still mean something -
+                               ticking an inbound is how this state is left. -->
+                          <a-menu-item key="exportTxt" v-if="isServed(row)">
+                            <a-icon type="file-text"></a-icon>{{ i18n "pages.inbounds.exportTxt" }}
+                          </a-menu-item>
+                          <a-menu-item key="exportPdf" v-if="isServed(row)">
+                            <a-icon type="file-pdf"></a-icon>{{ i18n "pages.inbounds.exportPdf" }}
+                          </a-menu-item>
+                          <a-menu-item key="reset" v-if="isServed(row)">
+                            <a-icon type="retweet"></a-icon>{{ i18n "pages.inbounds.resetTraffic" }}
+                          </a-menu-item>
+                          <!-- Freeze locks the remaining days instead of letting them
+                               tick away while the account is off, so a customer who
+                               pauses for a month keeps the month. -->
+                          <a-menu-item key="freeze" v-if="isServed(row)">
+                            <a-icon type="pause-circle"></a-icon>
+                            [[ isAccountFrozen(row) ? '{{ i18n "pages.client.unfreeze" }}'
+                                                    : '{{ i18n "pages.client.freeze" }}' ]]
+                          </a-menu-item>
+                          <a-menu-divider></a-menu-divider>
+                          <a-menu-item key="delete">
+                            <span :style="{ color: 'var(--error)' }">
+                              <a-icon type="delete"></a-icon>{{ i18n "delete" }}
+                            </span>
+                          </a-menu-item>
+                        </a-menu>
+                      </a-dropdown>
+                    </div>
+                  </template>
+
+                  <!-- One block per inbound serving the account. Each carries only
+                       what actually differs between them: the protocol, the
+                       credential the customer installs and the bytes that inbound
+                       moved. The quota, the expiry and the enable state are the
+                       ACCOUNT's, shown once on the row above rather than repeated
+                       here for every membership.
+                       The v-for alias is called `record` because clientActionIcons
+                       reads `record` as the inbound its client belongs to. -->
+                  <template slot="expandedRowRender" slot-scope="row">
+                    <div class="bo-mb-list">
+                      <template v-for="record in accountInbounds(row)">
+                        <div class="bo-mb" :key="record.id"
+                          :class="{ off: !membershipEnabled(row, record) }"
+                          v-for="client in accountClientIn(row, record)">
+                          <div class="bo-mb-id">
+                            <!-- Live ON THIS INBOUND, not "this account is live
+                                 somewhere". The lamp above the expander answers the
+                                 account-wide question; repeating that answer here lit
+                                 every membership of a customer connected over one of
+                                 them. A hollow lamp means this inbound saw no traffic
+                                 last tick; a ringed one means it did. -->
+                            <a-tooltip>
+                              <template slot="title">
+                                [[ membershipOnlineText(record, client.email) ]]
+                              </template>
+                              <span class="bo-mb-lamp"
+                                :class="membershipLampClass(record, client.email)"></span>
+                            </a-tooltip>
+                            <a-tag :style="{ margin: '0' }" class="bo-proto"
+                              :class="'bo-proto--' + protocolFamily(record.protocol)">
+                              [[ ProtocolLabels[record.protocol] || record.protocol ]]
+                            </a-tag>
+                            <span class="bo-mb-name">[[ record.remark || ('#' + record.id) ]]</span>
+                            <span class="bo-mb-port">:[[ record.port ]]</span>
+                          </div>
+
+                          <!-- What the operator hands the customer FOR THIS INBOUND,
+                               which is a different artifact per protocol family: the
+                               share link a client imports, or the login pair a
+                               dial-in protocol authenticates with. Both are
+                               per-inbound, which is why neither can be shown once on
+                               the account row above. -->
+                          <div class="bo-mb-cred" v-if="membershipCredentials(record, client).length">
+                            <a-tooltip v-for="cred in membershipCredentials(record, client)" :key="cred.key">
+                              <template slot="title">
+                                [[ cred.label ]] &middot; {{ i18n "copy" }}
+                                <div class="bo-mb-cred-full">[[ cred.value ]]</div>
+                              </template>
+                              <span class="bo-mb-cred-one" @click="copyText(cred.value)">
+                                <span class="bo-mb-cred-k">[[ cred.short ]]</span>
+                                <span class="bo-mb-cred-v">[[ cred.value ]]</span>
+                                <a-icon type="copy"></a-icon>
+                              </span>
+                            </a-tooltip>
+                          </div>
+                          <span v-else class="bo-mb-cred"></span>
+
+                          <!-- This inbound's own bytes, except where the core cannot
+                               say. Xray counts per ACCOUNT with no inbound in the
+                               stat name, so for a vmess/vless/trojan/... membership
+                               the figure is the account's unattributed remainder,
+                               shared with every other Xray inbound serving it. That
+                               is marked rather than hidden: the alternative was a
+                               zero, which reads as "never used" and is false. -->
+                          <a-popover :overlay-class-name="themeSwitcher.currentTheme">
+                            <template slot="content">
+                              <table cellpadding="2">
+                                <tr>
+                                  <td>&uarr; [[ sizeFormat(getInboundUpStats(record, client.email)) ]]</td>
+                                  <td>&darr; [[ sizeFormat(getInboundDownStats(record, client.email)) ]]</td>
+                                </tr>
+                                <tr>
+                                  <td>{{ i18n "pages.inbounds.allTimeTraffic" }}</td>
+                                  <td>[[ sizeFormat(getInboundAllTime(record, client.email)) ]]</td>
+                                </tr>
+                                <tr v-if="isSharedStats(record, client.email)">
+                                  <td colspan="2" class="bo-mb-shared-note">
+                                    {{ i18n "pages.clients.sharedUsageHint" }}
+                                  </td>
+                                </tr>
+                              </table>
+                            </template>
+                            <div class="bo-mb-use">
+                              <b>[[ sizeFormat(getInboundSumStats(record, client.email)) ]]</b>
+                              <span v-if="isSharedStats(record, client.email)"
+                                class="bo-mb-shared">{{ i18n "pages.clients.sharedUsage" }}</span>
+                            </div>
+                          </a-popover>
+
+                          <div class="bo-mb-actions">
+                            <a-space :size="10">
+                              <!-- Per-inbound, unlike the row above: it takes the
+                                   account off ONE inbound and leaves the rest
+                                   serving it. -->
+                              <a-tooltip>
+                                <template slot="title">{{ i18n "pages.inbounds.enable" }}</template>
+                                <a-switch size="small" :checked="!!client.enable"
+                                  @change="v => switchEnableClient(record.id, client, v)"></a-switch>
+                              </a-tooltip>
+                              {{template "component/clientActionIcons"}}
+                            </a-space>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </a-table>
+              </a-card>
+            </a-col>
+          </a-row>
+        </transition>
+      </a-spin>
+      {{template "component/bulkOpsModal" .}}
+{{template "page/shell_end" . }}
+
+{{template "page/body_scripts" .}}
+<script src="{{ .base_path }}assets/qrcode/qrious2.min.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/uri/URI.min.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/reality_targets.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/inbound.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/dbinbound.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/jspdf/jspdf.umd.min.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/js/util/export.js?{{ .asset_ver }}"></script>
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "component/aPersianDatepicker" .}}
+{{template "component/clientActions" .}}
+{{template "modals/promptModal"}}
+{{template "modals/textModal"}}
+{{template "modals/qrcodeModal"}}
+{{template "modals/inboundInfoModal"}}
+{{template "modals/accountInfoModal"}}
+{{template "modals/membershipInfoModal"}}
+{{template "modals/clientsBulkModal"}}
+{{template "modals/wgcConfigModal"}}
+{{template "modals/awgConfigModal"}}
+{{template "modals/greConfigModal"}}
+{{template "modals/sshConfigModal"}}
+{{template "modals/clientMembershipModal" .}}
+
+<script>
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    // ClientActionsMixin brings every client action, the selection state and the
+    // bulk-operation run; this page only has to supply the four hooks and the
+    // state it names. MediaQueryMixin went with the per-inbound tables that used
+    // to need a separate mobile column set: the expander is a flex list now and
+    // reflows on its own.
+    mixins: [ClientActionsMixin],
+    data: {
+      // themeSwitcher, pageTitle and pageClass are read by the shell in
+      // page/shell_start. Omitting any of them makes the WHOLE #app render throw,
+      // which leaves the page blank behind v-cloak with a valid 200 on the wire.
+      themeSwitcher,
+      pageTitle: '{{ i18n "pages.clients.title" }}',
+      // Not cosmetic: custom.css keys the table ring and several ant overrides off
+      // the page class, and the portalled modals are reached through sibling
+      // selectors on it. Without one this page rendered a table nobody had styled.
+      pageClass: 'clients-page',
+      persianDatepicker,
+      spinning: false,
+      // The account rows this page lists, and the raw inbounds behind them. Both
+      // are needed: the rows carry the account-level totals the server computed,
+      // the inbounds carry the per-protocol client objects every action works on.
+      clients: [],
+      dbInbounds: [],
+      inbounds: [],
+      assignable: [],
+      search: '',
+      searchTimer: null,
+      selectedEmails: [],
+      expandedRowKeys: [],
+      refreshing: false,
+      // Comfortable or compact rows. Remembered, because an operator running a
+      // fleet of several hundred sets this once and means it.
+      density: localStorage.getItem("clientsDensity") === "compact" ? "compact" : "comfortable",
+      isRefreshEnabled: localStorage.getItem("isRefreshEnabled") === "true",
+      refreshInterval: Number(localStorage.getItem("refreshInterval")) || 5000,
+      onlineClients: [],
+      // The same liveness, per (inbound, account): "<inboundId>:<email>", with
+      // inbound 0 for a session whose source inbound the collector could not name.
+      // A plain array because that is what the endpoint returns; membershipOnline
+      // indexes it once per refresh rather than scanning it per rendered block.
+      onlineMemberships: [],
+      lastOnlineMap: {},
+      expireDiff: 0,
+      trafficDiff: 0,
+      remarkModel: '-ieo',
+      datepicker: 'gregorian',
+      tgBotEnable: false,
+      ipLimitEnable: false,
+      subSettings: {
+        enable: false,
+        subTitle: '',
+        subURI: '',
+        subJsonURI: '',
+        subJsonEnable: false,
+      },
+      // Seeded from the server-rendered RESELLER global so it is right on first
+      // paint, then held here: RESELLER is a snapshot taken when the page was
+      // served and is wrong the moment an account is created or deleted.
+      resellerBalance: {
+        unlimited: !!RESELLER.unlimited,
+        allowanceBytes: Number(RESELLER.allowanceBytes) || 0,
+        spentBytes: Number(RESELLER.spentBytes) || 0,
+        availableBytes: Number(RESELLER.availableBytes) || 0,
+      },
+      pagination: { current: 1, pageSize: 50, total: 0, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'] },
+      // The order, resolved SERVER-SIDE. It has to be: this table is paged by the
+      // server, so a browser-side sort would order the fifty rows it happens to be
+      // holding and present that as the order of two hundred.
+      //
+      // Remembered PER ADMIN, not per browser. The key carries the logged-in user's
+      // id, which every page already receives from the server, because a bare
+      // "clientsSort" key is shared by everyone who signs in from the same machine:
+      // one admin sorting by disabled accounts would silently reorder the list for
+      // the next person to log in on that browser.
+      sortKey: localStorage.getItem('clientsSort:{{ .me }}') || 'newest',
+      // Five complete orderings, not a field plus a direction. "Newest" already says
+      // which way it runs, so there is nothing for an ascending/descending toggle to
+      // do and the menu is one click rather than two.
+      sortOptions: [
+        { key: 'newest',  label: '{{ i18n "pages.clients.sortNewest" }}' },
+        { key: 'oldest',  label: '{{ i18n "pages.clients.sortOldest" }}' },
+        { key: 'online',  label: '{{ i18n "online" }}' },
+        { key: 'enable',  label: '{{ i18n "enabled" }}' },
+        { key: 'disable', label: '{{ i18n "disabled" }}' },
+      ],
+    },
+    computed: {
+      // Fixed widths on everything except Serving, which is the one column whose
+      // content genuinely varies and so is the one that should absorb the slack.
+      // The four fixed ones are deliberately tight: three protocol chips need
+      // about 330px, and at the widths this started with Serving fell just under
+      // that, so a three-inbound account wrapped onto two lines and stood a head
+      // taller than every row around it.
+      //
+      // No column carries a sorter. The orderings this page offers are not columns:
+      // three of the five are about state, and "newest" has no column at all. Header
+      // arrows alongside them would be a second sort control that could put the list
+      // in an order the menu has no item for, leaving the menu ticking nothing.
+      columns() {
+        const col = (key, title, slot, extra) => Object.assign({
+          title, key, scopedSlots: { customRender: slot },
+        }, extra || {});
+        return [
+          col('email', '{{ i18n "pages.clients.email" }}', 'accountCol', { width: 230 }),
+          col('used', '{{ i18n "pages.clients.quota" }}', 'dataCol', { width: 170 }),
+          col('expiry', '{{ i18n "pages.clients.expiry" }}', 'expiresCol', { width: 150 }),
+          col('inbounds', '{{ i18n "pages.clients.inbounds" }}', 'servingCol'),
+          col('lastOnline', '{{ i18n "lastOnline" }}', 'seenCol', { width: 100 }),
+          // 104 fitted a switch and a menu button. The Account Info button made three
+          // controls, which overflowed the cell and gave the whole table a horizontal
+          // scrollbar. Measured, not guessed: switch 28 + gap 6 + button 24 + gap 6 +
+          // button 24 = 88, plus the cell's own padding.
+          { title: '', key: 'actions', scopedSlots: { customRender: 'rowCol' }, width: 132, align: 'right' },
+        ];
+      },
+    },
+    methods: {
+      sizeFormat(b) { return SizeFormatter.sizeFormat(b || 0); },
+      usedPercent(row) {
+        if (!row.totalGB) return 0;
+        return Math.min(100, Math.round(((row.up + row.down) / row.totalGB) * 100));
+      },
+      expired(row) { return row.expiryTime > 0 && row.expiryTime < Date.now(); },
+      // IntlUtil is what every other table in this panel formats dates with;
+      // there is no DateUtil.
+      formatExpiry(row) { return IntlUtil.formatDate(row.expiryTime); },
+      // Stored negative, in milliseconds, counting DOWN from first use.
+      delayedDays(row) { return Math.round(Math.abs(row.expiryTime) / 86400000); },
+
+      // --- the ledger row --------------------------------------------------
+      depleted(row) { return row.totalGB > 0 && row.up + row.down >= row.totalGB; },
+      // Sold but never connected. A delayed-start account stores its deadline as a
+      // NEGATIVE number of milliseconds, meaning "this many days from first use",
+      // and the server rewrites it to an absolute deadline on the first traffic
+      // tick that names the account (adjustTraffics in web/service/inbound.go). So
+      // a negative expiry on an ENABLED account is not a stale value to work
+      // around, it is a positive statement that the clock has never started.
+      //
+      // Only reachable below after the disabled test, which matters: frozen is
+      // ALSO stored as a negative expiry and is told apart from a delayed start by
+      // `enable` alone. Testing this first would paint every frozen account as one
+      // that had never been used.
+      notStarted(row) { return Number(row.expiryTime) < 0; },
+      // The account's health as ONE value, in the reserved status scale.
+      //
+      // Order matters, and "disabled" is deliberately not last. The panel
+      // auto-disables an account the moment it expires or runs out, so an operator
+      // scanning this column is looking for the same thing in all three cases:
+      // an account that has stopped working and needs chasing. They are one red.
+      // That is a change from the old scale, which spent grey on "switched off by
+      // hand" and red on "ran out" - a distinction the tooltip still makes, and
+      // one nobody could act on differently anyway.
+      //
+      // The colourless lamp then has exactly one meaning left, which is what makes
+      // it worth a slot at all: nothing has happened on this account yet.
+      lampClass(row) {
+        if (!row.enable || this.expired(row) || this.depleted(row)) return 'bo-lamp--error';
+        // Nothing serves it, so it cannot be online, healthy or about to run out:
+        // no clock is running. Same hue as a delayed start, which is the other
+        // "real account, not yet carrying traffic" state, and ahead of the online
+        // test because a stale session must not light a row nothing serves.
+        if (!this.isServed(row)) return 'bo-lamp--idle';
+        if (this.notStarted(row)) return 'bo-lamp--idle';
+        if (this.isClientOnline(row.email)) return 'bo-lamp--live';
+        // Amber survives as a variant of "working, not connected": an account
+        // inside a week of its deadline or past 85% of its quota is still healthy,
+        // but it is the one an operator wants to renew before the customer calls.
+        if (this.expiringSoon(row) || this.usedPercent(row) >= 85) return 'bo-lamp--warn';
+        return 'bo-lamp--ok';
+      },
+      // Same order, so the tooltip never disagrees with the colour it explains.
+      // It is finer-grained than the colour on purpose: four hues is what a glance
+      // can carry, and the tooltip is where the operator has already stopped to
+      // ask which of the three red cases this one is.
+      stateLabel(row) {
+        if (this.isAccountFrozen(row)) return '{{ i18n "pages.client.frozen" }}';
+        if (this.expired(row)) return '{{ i18n "pages.clients.summaryExpired" }}';
+        if (this.depleted(row)) return '{{ i18n "depleted" }}';
+        if (!row.enable) return '{{ i18n "disabled" }}';
+        if (!this.isServed(row)) return '{{ i18n "pages.clients.noInbounds" }}';
+        if (this.notStarted(row)) return '{{ i18n "pages.client.delayedStart" }}';
+        return this.isClientOnline(row.email) ? '{{ i18n "online" }}' : '{{ i18n "offline" }}';
+      },
+      // Is any inbound serving this account. An account may deliberately be on none:
+      // it keeps its credentials, quota and usage history and simply carries no
+      // traffic, so it is not disabled, not expired and not broken - and every row
+      // action that is addressed to an inbound has nothing to address.
+      isServed(row) {
+        return !!(row && row.memberships && row.memberships.length);
+      },
+      // A positive deadline inside a week. Deliberately NOT true for a delayed
+      // start or a frozen account: neither clock is running, so neither is
+      // running out.
+      expiringSoon(row) {
+        if (!(row.expiryTime > 0)) return false;
+        const left = row.expiryTime - Date.now();
+        return left > 0 && left <= 7 * 86400000;
+      },
+      meterClass(row) {
+        if (!row.totalGB) return 'bo-meter--inf';
+        const p = this.usedPercent(row);
+        return p >= 100 ? 'bo-meter--error' : p >= 85 ? 'bo-meter--warn' : '';
+      },
+      // The expiry field is three different things wearing one column. Frozen and
+      // delayed-start are BOTH stored as a negative expiry, and only `enable`
+      // tells them apart, so the frozen test has to come first.
+      expiryView(row) {
+        if (this.isAccountFrozen(row)) {
+          return { rel: '{{ i18n "pages.client.frozen" }}', toneClass: 'bo-lg-rel--info',
+                   abs: this.delayedDays(row) + ' {{ i18n "pages.clients.summaryDays" }}' };
+        }
+        if (row.expiryTime < 0) {
+          return { rel: this.delayedDays(row) + ' {{ i18n "pages.clients.daysAfterFirstUse" }}',
+                   toneClass: 'bo-lg-rel--info', abs: '' };
+        }
+        if (row.expiryTime === 0) {
+          return { rel: '{{ i18n "pages.clients.summaryNever" }}', toneClass: '', abs: '' };
+        }
+        // Localized by Intl.RelativeTimeFormat, so "in 12 days" / "3 days ago"
+        // arrive in the operator's own language with no key of ours.
+        return {
+          rel: IntlUtil.formatRelativeTime(row.expiryTime),
+          toneClass: this.expired(row) ? 'bo-lg-rel--error'
+                   : this.expiringSoon(row) ? 'bo-lg-rel--warn' : '',
+          abs: this.shortDate(row.expiryTime),
+        };
+      },
+      shortDate(ts) {
+        try {
+          return new Intl.DateTimeFormat(LanguageManager.getLanguage(),
+            { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(ts));
+        } catch (e) {
+          return new Date(ts).toISOString().slice(0, 10);
+        }
+      },
+      // Roomier shows EVERY inbound, however many that is: the column is the
+      // answer to "where is this account served", and a "+2" is not that answer.
+      // The cost is that an account on five inbounds wraps its cell onto a second
+      // line and stands taller than its neighbours - which is what roomier is
+      // for. Compact is the mode that trades completeness for uniform rows.
+      //
+      // Compact's cap counts RENDERED chips, +N included. Capping memberships
+      // instead let a four-inbound account draw two chips and a "+2" - three
+      // chips wide - and wrap anyway.
+      servingCap() { return this.density === 'compact' ? 2 : Infinity; },
+      shownMemberships(row) {
+        const all = row.memberships || [];
+        const cap = this.servingCap();
+        return all.length <= cap ? all : all.slice(0, cap - 1);
+      },
+      hiddenMemberships(row) {
+        const all = row.memberships || [];
+        return all.slice(this.shownMemberships(row).length);
+      },
+      lastSeen(row) {
+        if (this.isClientOnline(row.email)) return '{{ i18n "online" }}';
+        const ts = this.getLastOnline(row.email);
+        if (!ts) return '{{ i18n "pages.clients.summaryNever" }}';
+        return IntlUtil.formatRelativeTime(ts);
+      },
+      toggleDensity() {
+        this.density = this.density === 'compact' ? 'comfortable' : 'compact';
+        localStorage.setItem('clientsDensity', this.density);
+      },
+      // The row menu. Reset and delete confirm here rather than in the markup: a
+      // menu item cannot host a popconfirm the way a button could, and both are
+      // irreversible enough to deserve the stop.
+      rowAction(key, row) {
+        switch (key) {
+          case 'edit': return this.openEdit(row);
+          case 'sub': return this.showAccountSub(row);
+          case 'freeze': return this.toggleAccountFreeze(row);
+          case 'exportTxt': return this.exportTxt(this.accountTargets(row), row.email);
+          case 'exportPdf': return this.exportPdf(this.accountTargets(row), row.email);
+          case 'delete': return this.confirmDelete(row);
+          case 'reset':
+            return this.$confirm({
+              title: '{{ i18n "pages.inbounds.resetTraffic" }} ' + row.email,
+              content: '{{ i18n "pages.inbounds.resetTrafficContent" }}',
+              class: themeSwitcher.currentTheme,
+              okText: '{{ i18n "reset" }}',
+              cancelText: '{{ i18n "cancel" }}',
+              onOk: () => this.resetAccountTraffic(row),
+            });
+        }
+      },
+
+      // --- the hooks ClientActionsMixin expects ---------------------------
+      loading(spinning = true) { this.spinning = spinning; },
+      // The mixin's write funnel. Unlike the Inbounds page there is no inbound
+      // CREATE to gate here, so this is the plain form.
+      async submit(url, data, modal) {
+        const msg = await HttpUtil.postWithModal(url, data, modal);
+        if (msg.success) {
+          await this.getDBInbounds();
+          await this.refreshResellerBalance();
+        }
+      },
+      // Named for the mixin's contract. On this page "refresh after a write" means
+      // both halves: the inbounds every action reads through, and the account rows
+      // the table lists.
+      async getDBInbounds() {
+        const msg = await HttpUtil.get('/panel/api/inbounds/list');
+        if (msg.success) this.setInbounds(msg.obj || []);
+        await this.loadClients();
+      },
+      // Not called getLastOnline: that name is the mixin's per-email LOOKUP, and
+      // shadowing it made every rendered row fire two requests and then format a
+      // Promise as a date.
+      async loadOnlineState() {
+        const [onlines, memberships, last] = await Promise.all([
+          HttpUtil.post('/panel/api/inbounds/onlines'),
+          HttpUtil.post('/panel/api/inbounds/onlineMemberships'),
+          HttpUtil.post('/panel/api/inbounds/lastOnline'),
+        ]);
+        if (onlines && onlines.success) this.onlineClients = onlines.obj || [];
+        if (memberships && memberships.success) this.onlineMemberships = memberships.obj || [];
+        if (last && last.success) this.lastOnlineMap = last.obj || {};
+      },
+      async refreshResellerBalance() {
+        if (!RESELLER.isReseller) return;
+        const msg = await HttpUtil.get('/panel/api/inbounds/resellerBalance');
+        if (!msg || !msg.success || !msg.obj) return;
+        const b = msg.obj;
+        this.resellerBalance = {
+          unlimited: !!b.unlimited,
+          allowanceBytes: Number(b.allowanceBytes) || 0,
+          spentBytes: Number(b.spentBytes) || 0,
+          availableBytes: Number(b.availableBytes) || 0,
+        };
+      },
+
+      setInbounds(rows) {
+        this.inbounds.splice(0);
+        this.dbInbounds.splice(0);
+        for (const row of rows) {
+          const dbInbound = new DBInbound(row);
+          this.inbounds.push(dbInbound.toInbound());
+          this.dbInbounds.push(dbInbound);
+        }
+      },
+      async getDefaultSettings() {
+        const msg = await HttpUtil.post('/panel/setting/defaultSettings');
+        if (!msg.success) return;
+        const settings = msg.obj || {};
+        this.expireDiff = settings.expireDiff * 86400000;
+        this.trafficDiff = settings.trafficDiff * 1073741824;
+        this.tgBotEnable = settings.tgBotEnable;
+        this.ipLimitEnable = settings.ipLimitEnable;
+        this.remarkModel = settings.remarkModel;
+        this.datepicker = settings.datepicker;
+        this.subSettings = {
+          enable: settings.subEnable,
+          subTitle: settings.subTitle,
+          subURI: settings.subURI,
+          subJsonURI: settings.subJsonURI,
+          subJsonEnable: settings.subJsonEnable,
+        };
+      },
+
+      async loadClients() {
+        const q = `?page=${this.pagination.current}&size=${this.pagination.pageSize}`
+          + `&search=${encodeURIComponent(this.search || '')}`
+          + `&sort=${encodeURIComponent(this.sortKey)}`;
+        const msg = await HttpUtil.get('/panel/api/clients/list' + q);
+        if (!msg || !msg.success) return;
+        this.clients = (msg.obj && msg.obj.rows) || [];
+        this.pagination.total = (msg.obj && msg.obj.total) || 0;
+        // Taken from the ANSWER, not from what was asked. The server falls back to
+        // newest for an ordering it does not know, and a stale key left in this
+        // user's localStorage by an older build would otherwise leave the menu
+        // ticking an item the list is not actually ordered by.
+        if (msg.obj && msg.obj.sort && msg.obj.sort !== this.sortKey) {
+          this.sortKey = msg.obj.sort;
+          localStorage.setItem('clientsSort:{{ .me }}', this.sortKey);
+        }
+        // Drop selections that are no longer on the page, or a bulk action would
+        // silently act on rows the operator can no longer see.
+        const visible = new Set(this.clients.map(c => c.email));
+        this.onSelectChange(this.selectedEmails.filter(e => visible.has(e)));
+      },
+      async loadAssignable() {
+        const msg = await HttpUtil.get('/panel/api/clients/assignable');
+        if (msg && msg.success) this.assignable = msg.obj || [];
+      },
+      // Shares localStorage with the Inbounds page on purpose: an operator who
+      // turned auto-refresh on there means it here too.
+      async startDataRefreshLoop() {
+        while (this.isRefreshEnabled) {
+          try {
+            await this.getDBInbounds();
+          } catch (e) {
+            console.error(e);
+          }
+          await PromiseUtil.sleep(this.refreshInterval);
+        }
+      },
+      toggleRefresh() {
+        localStorage.setItem("isRefreshEnabled", this.isRefreshEnabled);
+        if (this.isRefreshEnabled) this.startDataRefreshLoop();
+      },
+      changeRefreshInterval() {
+        localStorage.setItem("refreshInterval", this.refreshInterval);
+      },
+      async manualRefresh() {
+        if (this.refreshing) return;
+        this.refreshing = true;
+        try { await this.reload(false); } finally { this.refreshing = false; }
+      },
+      async reload(showSpin) {
+        if (showSpin) this.spinning = true;
+        await Promise.all([this.getDBInbounds(), this.loadOnlineState(), this.loadAssignable()]);
+        this.spinning = false;
+      },
+
+      // --- the expanded row ------------------------------------------------
+      // The DBInbound objects behind an account's memberships. Read from
+      // dbInbounds rather than from the row's own membership list because every
+      // client action needs the real inbound (its settings, its clientStats), not
+      // the summary the accounts API returns.
+      accountInbounds(row) {
+        return (row.memberships || [])
+          .map(m => this.dbInbounds.find(r => r.id === m.inboundId))
+          .filter(Boolean);
+      },
+      // A one-element list, not the client itself: it is consumed by a v-for, which
+      // is what puts BOTH `record` and `client` in scope for clientActionIcons
+      // without a wrapper component to pass them through.
+      accountClientIn(row, dbInbound) {
+        const client = (this.getInboundClients(dbInbound) || []).find(c => c.email === row.email);
+        return client ? [client] : [];
+      },
+      // Enabled ON THIS INBOUND. Normally the same as the account's own flag, since
+      // a write projects onto every membership, but the per-membership switch below
+      // can turn one off on its own.
+      membershipEnabled(row, dbInbound) {
+        const client = (this.getInboundClients(dbInbound) || []).find(c => c.email === row.email);
+        return client ? client.enable !== false : false;
+      },
+      // What the operator hands the customer for THIS inbound.
+      //
+      // This used to be getClientIdentity's answer, always: a uuid on vmess, a
+      // password on trojan, a login name on ssh. That is the field the protocol
+      // AUTHENTICATES on, which is not the same question. A vless uuid on its own
+      // configures nothing, since the address, port, transport, reality key and flow
+      // are all missing from it, and copying it gave an operator something they then
+      // could not send to anybody. An l2tp account needs BOTH of its fields, so
+      // showing one of them was showing half a credential.
+      //
+      // So: whatever the customer actually installs. A share link where the protocol
+      // produces one, the login pair where it does not.
+      membershipCredentials(dbInbound, client) {
+        if (!dbInbound || !client) return [];
+        // Anything a client imports by URL, which is hasLink()'s own question. Going
+        // through it rather than listing protocols here means anytls, tuic, naive and
+        // mtproto are covered with no second list to keep in step, and a protocol
+        // that gains a link generator later is covered by that alone.
+        if (dbInbound.hasLink()) {
+          const inbound = dbInbound.toInbound();
+          let links = [];
+          try {
+            links = inbound.genAllLinks('', this.remarkModel || '-ieo', client) || [];
+          } catch (e) {
+            // A half-configured inbound (no certificate yet, a reality key not
+            // generated) can throw in a generator. One block failing to offer a link
+            // must not take the whole expander down with it.
+            console.warn('link generation failed for inbound ' + dbInbound.id, e);
+            return [];
+          }
+          // mtproto yields one link per enabled mode, so the label carries the mode
+          // and there can legitimately be several.
+          return links.filter(l => l && l.link).map((l, i) => ({
+            label: '{{ i18n "pages.clients.shareLink" }}' + (links.length > 1 && l.remark ? ' (' + l.remark + ')' : ''),
+            short: '{{ i18n "pages.clients.shareLinkShort" }}',
+            value: String(l.link),
+            key: 'link' + i,
+          }));
+        }
+        // The seven dial-in protocols: the customer types two fields into their
+        // client, and neither is derivable from the other. `id` is the login name on
+        // these (applyAccountCredential writes account.VpnUsername there), which is
+        // exactly why it must not be labelled the way a uuid would be.
+        if (CLIENT_USERPASS_PROTOCOLS.includes(dbInbound.protocol)) {
+          const out = [];
+          if (client.id) {
+            out.push({ label: '{{ i18n "pages.clients.vpnUsername" }}',
+                       short: '{{ i18n "pages.clients.vpnUsernameShort" }}',
+                       value: String(client.id), key: 'user' });
+          }
+          if (client.password) {
+            out.push({ label: '{{ i18n "password" }}',
+                       short: '{{ i18n "pages.clients.passwordShort" }}',
+                       value: String(client.password), key: 'pass' });
+          }
+          return out;
+        }
+        // wg-c, awg, gre and the Xray-native wireguard are addressed by the email,
+        // which the row above already spells out. What their customer installs is a
+        // generated config, and that is behind this block's own config icon rather
+        // than something that fits on one line here.
+        return [];
+      },
+      // Two hues, neither of them a reserved status colour: the tag says which
+      // data plane serves the inbound, not how healthy it is. Same split as the
+      // Inbounds page, so one protocol wears one colour panel-wide.
+      protocolFamily(p) {
+        const k = String(p || '').toLowerCase();
+        const xrayNative = ['vless', 'vmess', 'trojan', 'shadowsocks', 'socks', 'http', 'dokodemo-door', 'wireguard'];
+        return xrayNative.includes(k) ? 'xray' : 'vpn';
+      },
+      async copyText(value) {
+        if (!value) return;
+        const ok = await ClipboardManager.copyText(value);
+        if (ok) this.$message.success('{{ i18n "copied" }}');
+      },
+
+      // --- selection --------------------------------------------------------
+      // The mixin resolves bulk targets from selClients, which is keyed per
+      // (inbound, email). An account row stands for every inbound serving it, so
+      // ticking one row expands into one key per membership.
+      onSelectChange(keys) {
+        this.selectedEmails = keys;
+        const next = [];
+        keys.forEach(email => {
+          const row = this.clients.find(c => c.email === email);
+          (row && row.memberships || []).forEach(m => next.push(m.inboundId + ':' + email));
+        });
+        this.selClients = next;
+      },
+      // Overrides the mixin's, which knows nothing about the row keys this table
+      // renders its checkboxes from.
+      clearSelection() {
+        this.selectedEmails = [];
+        this.selClients = [];
+        this.selInbounds = [];
+      },
+
+      onTableChange(pag) {
+        this.pagination.current = pag.current;
+        this.pagination.pageSize = pag.pageSize;
+        this.loadClients();
+      },
+      // Picking an ordering. Re-picking the one already applied does nothing rather
+      // than toggling a direction: each item IS a direction, so there is no second
+      // state for a second click to reach.
+      //
+      // Back to page 1, always. Page 3 of a list ordered by newest has nothing to do
+      // with page 3 of the same list ordered by disabled, so keeping the page number
+      // across a change lands the operator somewhere arbitrary.
+      pickSort(key) {
+        if (key === this.sortKey) return;
+        this.sortKey = key;
+        localStorage.setItem('clientsSort:{{ .me }}', key);
+        this.pagination.current = 1;
+        this.loadClients();
+      },
+      onSearch() { this.pagination.current = 1; this.loadClients(); },
+      onSearchChange() {
+        // Debounced so typing does not fire a request per keystroke.
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => { this.pagination.current = 1; this.loadClients(); }, 300);
+      },
+
+      // --- account-level actions --------------------------------------------
+      // Add is account-shaped, not protocol-shaped: pick the inbounds, and the
+      // server mints whatever credential each protocol needs. Editing one
+      // membership's protocol fields is what openEdit is for.
+      openAdd() {
+        clientMembershipModal.show({ assignable: this.assignable, onDone: () => this.getDBInbounds() });
+      },
+      // The SAME form as add, opened on an existing account. There used to be a
+      // second, older one here (modals/clientsModal + form/client), reached from
+      // this button while the membership form was reached from the one beside it:
+      // two forms for one account, disagreeing about what a credential is. That
+      // one is gone; this is the only client form the page has.
+      openEdit(row) {
+        clientMembershipModal.show({
+          row, storedBy: this.storedClients(row),
+          assignable: this.assignable, onDone: () => this.getDBInbounds(),
+        });
+      },
+      // Bulk add opens straight onto the form. The inbounds are ticked inside it,
+      // so nothing has to be chosen before the form can be built.
+      openBulkAdd() {
+        clientsBulkModal.show({
+          title: '{{ i18n "pages.client.bulk" }}',
+          okText: '{{ i18n "pages.client.bulk" }}',
+          assignable: this.assignable,
+          // Every email in use anywhere, so the form can say which generated names
+          // are already taken. One of them fails the whole POST server-side
+          // (AddInboundClient rejects the request, not the offending client), so
+          // the batch is worth checking before it is sent.
+          existing: this.emailsInUse(),
+          onDone: () => this.getDBInbounds(),
+        });
+      },
+      // One URL for the whole account. Passing the row itself would hand the modal
+      // an object with no subId when the account has none, which is exactly the
+      // case the icon is hidden for.
+      showAccountSub(row) {
+        qrModal.showSub(row.email, { subId: row.subId });
+      },
+      // The account panel. It reads everything through this page (inbounds, stats,
+      // exports), so it is handed the page rather than a copy of its state: a
+      // snapshot would go stale the moment a traffic tick landed behind it.
+      showAccountInfo(row) {
+        accountInfoModalApp.app = this;
+        accountInfoModal.show(row);
+      },
+      clickPageAction(action) {
+        switch (action.key) {
+          case 'resetClients':
+            this.resetAllClientTraffics(-1);
+            break;
+          case 'delDepletedClients':
+            this.delDepletedClients(-1);
+            break;
+        }
+      },
+
+      async toggleEnable(row, next) {
+        const want = typeof next === 'boolean' ? next : !row.enable;
+        // Optimistic, and deliberately so: a-switch is controlled off row.enable,
+        // so without this the toggle springs back under the cursor and sits there
+        // for the whole round trip. getDBInbounds replaces the row with the
+        // server's answer, which is what corrects it if the write is refused.
+        row.enable = want;
+        await this.applyToAccount(row, { enable: want });
+        await this.getDBInbounds();
+      },
+      // Frozen = disabled with a LOCKED remaining time. The negative expiry is what
+      // holds the clock: it is read as "this many days left", not as a date, so the
+      // days do not drain away while the account is off.
+      isAccountFrozen(row) {
+        return !!row && row.enable === false && Number(row.expiryTime) < 0;
+      },
+      // ONE call, not one per membership.
+      //
+      // The counters are already account-wide because the STORAGE is:
+      // client_traffics.email is unique panel-wide, so an account on four
+      // inbounds has exactly one row and zeroing it through any of them zeroes
+      // all of it. The loop that used to be here wrote that same row four times
+      // and paid for it: every reset sets the Xray restart flag, so a
+      // four-inbound account sat under a full-page spinner for ~24 seconds doing
+      // the same work four times. The inbound in the path is only what the
+      // ownership check is made against, which is why it can be any membership.
+      async resetAccountTraffic(row) {
+        const first = (row.memberships || [])[0];
+        if (!first) return;
+        this.loading();
+        try {
+          await HttpUtil.post(
+            `/panel/api/inbounds/${first.inboundId}/resetClientTraffic/${encodeURIComponent(row.email)}`);
+          await this.getDBInbounds();
+          await this.refreshResellerBalance();
+        } finally {
+          this.loading(false);
+        }
+      },
+      // The account, as the (inbound, email) pairs every membership-wide operation
+      // is addressed by. A row here is an ACCOUNT and the mixin speaks memberships,
+      // so anything that acts on "the customer" has to fan out over this list:
+      // handed a single membership instead, freeze would thaw one protocol and the
+      // export would ship one card for a customer who bought four.
+      accountTargets(row) {
+        return (row.memberships || []).map(m => ({ inboundId: m.inboundId, email: row.email }));
+      },
+      // One bulk call carrying every membership as a target, so the time-lock maths
+      // stays server-side and the whole account freezes or thaws in one write.
+      async toggleAccountFreeze(row) {
+        const targets = this.accountTargets(row);
+        if (!targets.length) return;
+        const op = this.isAccountFrozen(row) ? 'unfreeze' : 'freeze';
+        this.loading();
+        try {
+          const payload = {
+            op, days: 0, amountBytes: 0,
+            skipFirstUse: false, skipUnlimited: false, skipDisabled: false,
+            targets,
+          };
+          const msg = await HttpUtil.post('/panel/api/inbounds/bulkUpdateClients', { data: JSON.stringify(payload) });
+          if (msg && msg.success) {
+            this.$message.success(op === 'freeze'
+              ? '{{ i18n "pages.client.freeze" }}' : '{{ i18n "pages.client.unfreeze" }}');
+            await this.getDBInbounds();
+            await this.refreshResellerBalance();
+          }
+        } finally {
+          this.loading(false);
+        }
+      },
+      // The account's entry as it is actually STORED on one of its inbounds. Every
+      // write has to be built on top of this, never on a fresh object assembled
+      // from the account row: the row carries no credential, and a client posted
+      // without the field its protocol keys on is refused outright with
+      // "empty client ID" (clientIdentity in web/service/inbound.go).
+      //
+      // Serialized through toJson(), NOT by stringifying the instance. wg-c, awg,
+      // gre and mtproto expose `id` as a class GETTER returning the email, and a
+      // getter lives on the prototype, so JSON.stringify(instance) drops it. Those
+      // four key on "id" (clientIdentityKey), so the posted client arrived with no
+      // identity at all and every write answered "empty client ID".
+      storedClient(row, inboundId) {
+        const dbInbound = this.dbInbounds.find(r => r.id === inboundId);
+        const client = (this.getInboundClients(dbInbound) || []).find(c => c.email === row.email);
+        if (!client) return null;
+        return JSON.parse(JSON.stringify(
+          typeof client.toJson === 'function' ? client.toJson() : client));
+      },
+      // One per membership, because the identity field differs by protocol: the
+      // same account is a uuid on a vmess inbound and a password on a trojan one,
+      // and only the entry belonging to the inbound a write is addressed to can
+      // address it.
+      storedClients(row) {
+        const out = {};
+        for (const m of (row.memberships || [])) {
+          const client = this.storedClient(row, m.inboundId);
+          if (client) out[m.inboundId] = client;
+        }
+        return out;
+      },
+      // One account can be on several inbounds, so a change has to reach all of
+      // them. updateClient carries inboundIds and re-projects, which is why this
+      // page does not need a write path of its own.
+      async applyToAccount(row, patch) {
+        const ids = (row.memberships || []).map(m => m.inboundId);
+        // No inbound serves it, so no stored entry can address it and updateClient
+        // has nothing to match. The account route writes the same fields with no
+        // inbound in the request; without this the enable switch on such a row
+        // sprang back on the next refresh with nothing reporting a failure.
+        if (!ids.length) return await this.applyToUnservedAccount(row, patch);
+        const stored = this.storedClient(row, ids[0]);
+        if (!stored) return null;
+        const client = Object.assign(stored, {
+          email: row.email, enable: row.enable, totalGB: row.totalGB,
+          expiryTime: row.expiryTime, limitIp: row.limitIp, subId: row.subId,
+          comment: row.comment, reset: row.reset,
+        }, patch);
+        const body = { id: ids[0], inboundIds: ids, settings: JSON.stringify({ clients: [client] }) };
+        // The path parameter is the PROTOCOL's identity, not the email: a uuid for
+        // vmess and vless, the password for trojan and the credential VPNs, the
+        // auth for hysteria. Sending the email returns "empty client ID" for every
+        // protocol except shadowsocks. The list API reports it per membership.
+        const clientId = (row.memberships[0] && row.memberships[0].clientId) || row.email;
+        return await HttpUtil.post('/panel/api/inbounds/updateClient/' + encodeURIComponent(clientId), body);
+      },
+      // The same patch for an account nothing serves. Built from the ROW rather than
+      // from a stored entry, because there is no stored entry: the account row is
+      // the whole truth for one of these. noInbounds is what keeps it that way - the
+      // route sets the membership set to exactly what is posted, and posting nothing
+      // without the flag would read as "the caller did not mention memberships".
+      async applyToUnservedAccount(row, patch) {
+        const client = Object.assign({
+          email: row.email, enable: row.enable, totalGB: row.totalGB,
+          expiryTime: row.expiryTime, limitIp: row.limitIp, subId: row.subId,
+          comment: row.comment, reset: row.reset, tgId: row.tgId || 0,
+        }, patch);
+        return await HttpUtil.post('/panel/api/inbounds/saveAccount', {
+          noInbounds: true, settings: JSON.stringify({ clients: [client] }),
+        });
+      },
+
+      confirmDelete(row) {
+        this.$confirm({
+          title: '{{ i18n "pages.clients.deleteTitle" }}',
+          content: '{{ i18n "pages.clients.deleteContent" }} ' + row.email,
+          okText: '{{ i18n "delete" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          class: themeSwitcher.currentTheme,
+          okType: 'danger',
+          onOk: async () => {
+            const stuck = await this.deleteAccount(row);
+            await this.getDBInbounds();
+            this.reportStuck(row.email, stuck);
+          },
+        });
+      },
+      // Removed from EVERY inbound serving it. Deleting it from one and leaving the
+      // rest is a working account nobody is billed for, so a partial result has to
+      // be reported rather than left looking like success.
+      //
+      // The panel no longer refuses to empty an inbound, so the common cause of a
+      // partial result (an account that was the only client of one of its inbounds)
+      // is gone. This still reports what stuck, because a membership can fail for
+      // reasons of its own and a half-deleted account must not look like success.
+      async deleteAccount(row) {
+        const stuck = [];
+        // Nothing serves it, so there is no inbound to address the delete to and
+        // nothing in any settings blob to remove. What is left is the account row and
+        // its counter row, which is what this route takes.
+        if (!this.isServed(row)) {
+          const msg = await HttpUtil.post(
+            `/panel/api/inbounds/delAccount/${encodeURIComponent(row.email)}`);
+          if (!msg || !msg.success) stuck.push(row.email);
+          return stuck;
+        }
+        for (const m of (row.memberships || [])) {
+          const msg = await HttpUtil.post(
+            `/panel/api/inbounds/${m.inboundId}/delClientByEmail/${encodeURIComponent(row.email)}`);
+          if (!msg || !msg.success) stuck.push(m.remark || (m.protocol + ':' + m.port));
+        }
+        return stuck;
+      },
+      reportStuck(email, stuck) {
+        if (!stuck.length) return;
+        this.$error({
+          title: '{{ i18n "pages.clients.partialDeleteTitle" }}',
+          content: email + ': ' + stuck.join(', '),
+        });
+      },
+    },
+    async mounted() {
+      await this.getDefaultSettings();
+      await this.reload(true);
+      if (this.isRefreshEnabled) this.startDataRefreshLoop();
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

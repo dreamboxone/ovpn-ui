@@ -1,0 +1,174 @@
+{{define "modals/awgConfigModal"}}
+<a-modal id="awg-config-modal" v-model="awgConfigModal.visible" :title="awgConfigModal.title"
+  :closable="true" :mask-closable="true" :class="themeSwitcher.currentTheme" :footer="null" :width="640">
+  <a-spin :spinning="awgConfigModal.loading">
+    <div v-if="!awgConfigModal.loading && awgConfigModal.devices.length === 0"
+      :style="{ color: '#888', textAlign: 'center', padding: '24px' }">
+      No AmneziaWG configuration is available for this account yet.
+    </div>
+    <div v-for="(dev, index) in awgConfigModal.devices" :key="index" class="wg-cfg-device">
+      <div class="wg-cfg-head">
+        <b>AmneziaWG Config</b>
+        <a-tag color="green" :style="{ marginInlineStart: '8px' }">[[ dev.ip ]]</a-tag>
+        <a-tag v-if="dev.remark" color="blue" :style="{ marginInlineStart: '8px' }">[[ dev.remark ]]</a-tag>
+      </div>
+      <div class="wg-cfg-body">
+        <div class="wg-cfg-text">
+          <a-textarea :value="dev.config" read-only :auto-size="{ minRows: 8, maxRows: 20 }"
+            :style="{ fontFamily: 'monospace', fontSize: '12px' }"></a-textarea>
+          <a-space :style="{ marginTop: '8px' }">
+            <a-button size="small" @click="copy(dev.config)">
+              <a-icon type="copy"></a-icon> Copy
+            </a-button>
+            <a-button size="small" @click="download(dev)">
+              <a-icon type="download"></a-icon> Download
+            </a-button>
+          </a-space>
+        </div>
+        <div class="wg-cfg-qr">
+          <canvas :id="'awgQr-' + index" @click="copy(dev.config)"></canvas>
+        </div>
+      </div>
+    </div>
+    {{ template "component/aSubBlock" "awg" }}
+  </a-spin>
+</a-modal>
+
+<style>
+  .wg-cfg-device { padding: 14px 0; border-bottom: 1px solid rgba(128, 128, 128, 0.2); }
+  .wg-cfg-device:last-child { border-bottom: none; }
+  .wg-cfg-head { margin-bottom: 8px; }
+  .wg-cfg-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  .wg-cfg-text { flex: 1 1 300px; min-width: 260px; }
+  .wg-cfg-qr { flex: 0 0 auto; }
+  .wg-cfg-qr canvas {
+    width: 172px; height: 172px; cursor: pointer;
+    background: #fff; border-radius: 8px; padding: 6px;
+  }
+</style>
+
+<script>
+  const awgConfigModal = {
+    visible: false,
+    loading: false,
+    title: 'AmneziaWG Config',
+    dbInboundId: 0,
+    email: '',
+    // Declared here, not assigned only in show(): Vue makes the properties of this
+    // object reactive when the instance below is created, so a key added later would
+    // never drive the subscription block's v-if.
+    subId: '',
+    devices: [],
+    show: function (dbInboundId, client) {
+      this.dbInboundId = dbInboundId;
+      this.email = client && client.email ? client.email : '';
+      this.subId = client && client.subId ? client.subId : '';
+      this.title = 'AmneziaWG Config' + (this.email ? ' - ' + this.email : '');
+      this.devices = [];
+      this.loading = true;
+      this.visible = true;
+      awgConfigModalApp.fetchConfigs();
+    },
+    close: function () {
+      this.visible = false;
+    },
+  };
+
+  const awgConfigModalApp = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#awg-config-modal',
+    data: {
+      awgConfigModal: awgConfigModal,
+    },
+    computed: {
+      // What component/aSubBlock reads. Empty unless the sub server is on and the
+      // account has a subId, which is also what hides the block.
+      //
+      // The account's subId is read FIRST and unconditionally: a computed only re-runs
+      // when a dependency it actually touched changes, so guarding on app.subSettings
+      // ahead of it short-circuited before Vue ever recorded subId as a dependency, and
+      // the cached '' from page load was never invalidated when a modal opened. The
+      // settings arrive from an API call, so at that first evaluation they are not there
+      // yet and the guard was always false.
+      subId() {
+        const subId = awgConfigModal.subId;
+        const subEnabled = !!(typeof app !== 'undefined' && app.subSettings && app.subSettings.enable);
+        return subEnabled ? subId : '';
+      },
+      subLink() {
+        return this.subId ? app.subSettings.subURI + this.subId : '';
+      },
+      subJsonLink() {
+        return this.subId && app.subSettings.subJsonEnable
+          ? app.subSettings.subJsonURI + this.subId : '';
+      },
+    },
+    methods: {
+      async fetchConfigs() {
+        try {
+          // Respect the global axios baseURL: do NOT prefix with base_path here.
+          const msg = await HttpUtil.get(
+            '/panel/api/inbounds/' + awgConfigModal.dbInboundId + '/awg-configs',
+            { email: awgConfigModal.email }
+          );
+          awgConfigModal.devices = (msg && msg.success && Array.isArray(msg.obj)) ? msg.obj : [];
+        } catch (e) {
+          console.error('Failed to load AmneziaWG configs:', e);
+          awgConfigModal.devices = [];
+        } finally {
+          awgConfigModal.loading = false;
+        }
+      },
+      copy(content) {
+        ClipboardManager.copyText(content).then(() => {
+          app.$message.success('{{ i18n "copied" }}');
+        });
+      },
+      download(dev) {
+        // Filename is the account email; when several configs exist (external-proxy
+        // endpoints) the remark keeps their downloads from colliding.
+        const base = awgConfigModal.email || 'client';
+        const suffix = dev.remark ? '-' + String(dev.remark).replace(/[^A-Za-z0-9_.-]/g, '_') : '';
+        const name = base + suffix + '.conf';
+        const blob = new Blob([dev.config], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+      // a-modal portals its body to the document root, so these are looked up on the
+      // document rather than through this.$el.
+      qr(selector, value) {
+        const el = document.querySelector(selector);
+        if (!el || !value) return;
+        new QRious({
+          element: el,
+          size: 360,
+          value: value,
+          background: 'white',
+          backgroundAlpha: 1,
+          foreground: 'black',
+          padding: 8,
+          level: 'L',
+        });
+      },
+      renderQrs() {
+        awgConfigModal.devices.forEach((dev, index) => {
+          this.qr('#awgQr-' + index, dev.config);
+        });
+        this.qr('#awg-sub-qr', this.subLink);
+        this.qr('#awg-subjson-qr', this.subJsonLink);
+      },
+    },
+    updated() {
+      if (this.awgConfigModal.visible && !this.awgConfigModal.loading) {
+        this.$nextTick(() => this.renderQrs());
+      }
+    },
+  });
+</script>
+{{end}}

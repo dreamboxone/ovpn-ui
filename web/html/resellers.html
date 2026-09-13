@@ -1,0 +1,367 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+{{template "page/shell_start" . }}
+      <a-spin :spinning="spinning" :delay="300" tip='{{ i18n "loading"}}' size="large">
+        <transition name="list" appear>
+          <a-row :gutter="[16, 16]" :style="{ margin: 0 }">
+            <a-col :span="24">
+              <a-card hoverable :style="{ marginBottom: '16px' }">
+                <div :style="{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }">
+                  <a-button type="primary" icon="plus" @click="openAdd()">
+                    {{ i18n "pages.resellers.add" }}
+                  </a-button>
+                  <a-button icon="reload" @click="loadResellers(true)"></a-button>
+                </div>
+              </a-card>
+
+              <!-- One card per reseller, not a row. Eleven columns of levers in a
+                   fixed-width table had nowhere to put the status tag, so it broke
+                   into the balance cell; and the balance, which is the whole point
+                   of the page, read as just another narrow column. The card leads
+                   with what is left to sell and demotes the levers to spec rows,
+                   borrowing the Overview's vocabulary rather than inventing one. -->
+              <div class="bo-cards" v-if="resellers.length">
+                <article class="bo-tile bo-rs" v-for="reseller in resellers" :key="reseller.id">
+                  <div class="bo-rs-head">
+                    <div :style="{ minWidth: 0 }">
+                      <div class="bo-rs-name">
+                        [[ reseller.username ]]
+                        <a-tooltip v-if="reseller.twoFactorEnable">
+                          <template slot="title">{{ i18n "pages.admins.twoFactor" }}</template>
+                          <a-icon type="lock" :style="{ marginInlineStart: '6px', color: 'var(--ok)' }"></a-icon>
+                        </a-tooltip>
+                      </div>
+                      <div class="bo-rs-sub" v-if="reseller.nickname">[[ reseller.nickname ]]</div>
+                    </div>
+                    <div :style="{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }">
+                      <a-tag :color="reseller.enable ? 'green' : 'red'" :style="{ marginInlineEnd: 0 }">
+                        [[ reseller.enable ? '{{ i18n "enabled" }}' : '{{ i18n "disabled" }}' ]]
+                      </a-tag>
+                      <a-dropdown :trigger="['click']">
+                        <a-icon @click="e => e.preventDefault()" type="more"
+                          :style="{ fontSize: '16px', cursor: 'pointer' }"></a-icon>
+                        <a-menu slot="overlay" :theme="themeSwitcher.currentTheme">
+                          <a-menu-item @click="openEdit(reseller)">
+                            <a-icon type="edit"></a-icon>
+                            <span>{{ i18n "edit" }}</span>
+                          </a-menu-item>
+                          <a-menu-item @click="openRecharge(reseller)">
+                            <a-icon type="plus-circle"></a-icon>
+                            <span>{{ i18n "pages.resellers.recharge" }}</span>
+                          </a-menu-item>
+                          <!-- A reseller that still owns accounts opens a modal asking whether to
+                               delete the accounts too or hand them to the admin; a childless one
+                               deletes straight away. -->
+                          <a-menu-item @click="delReseller(reseller)">
+                            <span :style="{ color: 'var(--error)' }">
+                              <a-icon type="delete"></a-icon>
+                              <span>{{ i18n "delete" }}</span>
+                            </span>
+                          </a-menu-item>
+                        </a-menu>
+                      </a-dropdown>
+                    </div>
+                  </div>
+
+                  <!-- Balance is read-only everywhere it appears. Editing it in place would
+                       rewrite a ledger the outstanding accounts were sold out of, so the only
+                       way to move it is Recharge, which posts a delta. -->
+                  <div class="bo-rs-bal">
+                    <template v-if="reseller.unlimited">
+                      <div class="bo-rs-bal-val">{{ i18n "pages.resellers.unlimited" }}</div>
+                      <div class="bo-rs-bal-label">
+                        {{ i18n "pages.resellers.used" }}: [[ fmtBytes(reseller.spentBytes) ]]
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="bo-rs-bal-val" :class="reseller.availableBytes > 0 ? 'bo-ok' : 'bo-warn'">
+                        [[ fmtBytes(reseller.availableBytes) ]]
+                      </div>
+                      <div class="bo-rs-bal-label">{{ i18n "pages.resellers.available" }}</div>
+                      <a-progress :percent="usedPercent(reseller)" :show-info="false" size="small"
+                        :status="usedPercent(reseller) >= 100 ? 'exception' : 'normal'"
+                        :style="{ marginTop: '6px' }"></a-progress>
+                      <div class="bo-rs-bal-label">
+                        [[ fmtBytes(reseller.spentBytes) ]] / [[ fmtBytes(reseller.allowanceBytes) ]]
+                      </div>
+                    </template>
+                  </div>
+
+                  <dl class="bo-spec">
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--panel"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-list"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.accounts" }}</dt>
+                      <dd class="bo-spec-val num">[[ reseller.clientCount || 0 ]]</dd>
+                    </div>
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--loc"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-grid"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.inboundAccess" }}</dt>
+                      <dd class="bo-spec-val num">[[ (reseller.inboundIds || []).length ]]</dd>
+                    </div>
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--kernel"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-gauge"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.daysPerGb" }}</dt>
+                      <dd class="bo-spec-val num" v-if="reseller.daysPerGb > 0">[[ reseller.daysPerGb ]]</dd>
+                      <dd class="bo-spec-val bo-muted" v-else>{{ i18n "none" }}</dd>
+                    </div>
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--cores"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-sliders"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.minCreateGb" }}</dt>
+                      <dd class="bo-spec-val num">[[ reseller.minCreateGb || 0 ]] GB</dd>
+                    </div>
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--cores"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-sliders"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.minAddGb" }}</dt>
+                      <dd class="bo-spec-val num">[[ reseller.minAddGb || 0 ]] GB</dd>
+                    </div>
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--virt"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-link"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.allowExternalProxy" }}</dt>
+                      <dd class="bo-spec-val" :class="reseller.allowExternalProxy ? 'bo-ok' : 'bo-muted'">
+                        [[ reseller.allowExternalProxy ? '{{ i18n "enabled" }}' : '{{ i18n "disabled" }}' ]]
+                      </dd>
+                    </div>
+                    <!-- Whether this reseller may open the panel overview, which reports the
+                         whole server rather than only what they sold. Off for a new reseller. -->
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--os"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-eye"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.allowOverview" }}</dt>
+                      <dd class="bo-spec-val" :class="reseller.allowOverview ? 'bo-ok' : 'bo-muted'">
+                        [[ reseller.allowOverview ? '{{ i18n "enabled" }}' : '{{ i18n "disabled" }}' ]]
+                      </dd>
+                    </div>
+                    <!-- Reported as the AND the server resolves it by, not as the stored
+                         column: the manage flag scopes the page above it, so with the
+                         overview withheld it grants nothing and reading "Enabled" here
+                         would describe a reseller who has it. -->
+                    <div class="bo-spec-row">
+                      <span class="bo-spec-ico bo-spec-ico--os"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-pencil"></use></svg></span>
+                      <dt class="bo-spec-key">{{ i18n "pages.resellers.allowOverviewManage" }}</dt>
+                      <dd class="bo-spec-val"
+                        :class="reseller.allowOverview && reseller.allowOverviewManage ? 'bo-ok' : 'bo-muted'">
+                        [[ reseller.allowOverview && reseller.allowOverviewManage ? '{{ i18n "enabled" }}' : '{{ i18n "disabled" }}' ]]
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              </div>
+              <a-card hoverable v-else>
+                <a-empty :description="`{{ i18n "noData" }}`"></a-empty>
+              </a-card>
+            </a-col>
+          </a-row>
+        </transition>
+      </a-spin>
+
+      <a-modal id="recharge-modal"
+        title='{{ i18n "pages.resellers.rechargeTitle" }}'
+        :visible="recharge.visible"
+        :confirm-loading="recharge.confirmLoading"
+        ok-text='{{ i18n "confirm" }}'
+        cancel-text='{{ i18n "close" }}'
+        :class="themeSwitcher.currentTheme"
+        :closable="true"
+        :mask-closable="false"
+        @ok="() => submitRecharge()"
+        @cancel="() => recharge.visible = false">
+        <a-form :colon="false" layout="vertical">
+          <a-alert type="info" show-icon :style="{ marginBottom: '12px' }"
+            message='{{ i18n "pages.resellers.rechargeDesc" }}'></a-alert>
+          <a-form-item label='{{ i18n "pages.resellers.username" }}'>
+            <span>[[ recharge.username ]]</span>
+          </a-form-item>
+          <a-form-item label='{{ i18n "pages.resellers.available" }}'>
+            <span>[[ fmtBytes(recharge.availableBytes) ]]</span>
+          </a-form-item>
+          <!-- Negative is allowed on purpose: an admin who over-credited needs to take it
+               back, and the server is the one that refuses to cut below what is already sold. -->
+          <a-form-item label='{{ i18n "pages.resellers.rechargeAmount" }}'>
+            <a-input-number v-model.number="recharge.gb" :step="1" :style="{ width: '100%' }"></a-input-number>
+          </a-form-item>
+        </a-form>
+      </a-modal>
+
+      <a-modal id="reseller-del-modal"
+        :title="delTitle"
+        :visible="del.visible"
+        :confirm-loading="del.confirmLoading"
+        ok-text='{{ i18n "delete" }}'
+        cancel-text='{{ i18n "cancel" }}'
+        ok-type="danger"
+        :class="themeSwitcher.currentTheme"
+        :closable="true"
+        :mask-closable="false"
+        @ok="() => submitDelete()"
+        @cancel="() => del.visible = false">
+        <a-alert type="warning" show-icon :style="{ marginBottom: '16px' }">
+          <template slot="message">
+            [[ del.clientCount ]] {{ i18n "pages.resellers.deleteHasAccounts" }}
+          </template>
+        </a-alert>
+        <!-- a-radio labels are single-line with a fixed height in antd-vue 1.7.8; the
+             whiteSpace/height/lineHeight overrides let the descriptions wrap. -->
+        <a-radio-group v-model="del.mode" :style="{ display: 'flex', flexDirection: 'column', gap: '12px' }">
+          <a-radio value="keep" :style="{ whiteSpace: 'normal', height: 'auto', lineHeight: '1.4' }">
+            <span :style="{ fontWeight: 600 }">{{ i18n "pages.resellers.deleteKeep" }}</span>
+            <div class="bo-muted" :style="{ marginLeft: '24px' }">{{ i18n "pages.resellers.deleteKeepDesc" }}</div>
+          </a-radio>
+          <a-radio value="cascade" :style="{ whiteSpace: 'normal', height: 'auto', lineHeight: '1.4' }">
+            <!-- var(--error), not a raw hex: the token is what the three themes
+                 (light / dark / ultra-dark) actually redefine. -->
+            <span :style="{ fontWeight: 600, color: 'var(--error)' }">{{ i18n "pages.resellers.deleteCascade" }}</span>
+            <div class="bo-muted" :style="{ marginLeft: '24px' }">{{ i18n "pages.resellers.deleteCascadeDesc" }}</div>
+          </a-radio>
+        </a-radio-group>
+      </a-modal>
+{{template "page/shell_end" . }}
+
+{{template "page/body_scripts" .}}
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "modals/resellerModal" .}}
+
+<script>
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    mixins: [MediaQueryMixin],
+    el: '#app',
+    data: {
+      themeSwitcher,
+      pageTitle: '{{ i18n "pages.resellers.title" }}',
+      pageClass: '',
+      spinning: false,
+      resellers: [],
+      allInbounds: [],
+      recharge: { visible: false, confirmLoading: false, id: 0, username: '', availableBytes: 0, gb: 0 },
+      // Cascade-or-keep choice for deleting a reseller that still owns accounts;
+      // mode defaults to the non-destructive 'keep'.
+      del: { visible: false, confirmLoading: false, id: 0, username: '', clientCount: 0, mode: 'keep' },
+    },
+    computed: {
+      // Built here in the <script> so Go JS-escapes the translation; an apostrophe
+      // in a locale would break it inside a :title HTML attribute (see recharge).
+      delTitle() {
+        return '{{ i18n "pages.resellers.del" }}' + ': ' + this.del.username;
+      },
+    },
+    methods: {
+      async loadResellers(showSpin) {
+        if (showSpin) this.spinning = true;
+        const msg = await HttpUtil.get('/panel/resellers/list');
+        this.spinning = false;
+        if (!msg || !msg.success) return;
+        this.resellers = msg.obj || [];
+      },
+      async loadInbounds() {
+        const msg = await HttpUtil.get('/panel/resellers/inbounds');
+        if (msg && msg.success) this.allInbounds = msg.obj || [];
+      },
+      // Called as a method rather than passed around as a reference: sizeFormat reads
+      // this.ONE_KB off the class, so a detached copy formats every size as NaN.
+      fmtBytes(bytes) {
+        return SizeFormatter.sizeFormat(Number(bytes) || 0);
+      },
+      usedPercent(reseller) {
+        const total = Number(reseller.allowanceBytes) || 0;
+        if (total <= 0) return 0;
+        const spent = Number(reseller.spentBytes) || 0;
+        return Math.min(100, Math.round((spent / total) * 100));
+      },
+      openAdd() {
+        resellerModal.show({
+          title: '{{ i18n "pages.resellers.add" }}',
+          allInbounds: this.allInbounds,
+          isEdit: false,
+          confirm: async (reseller) => {
+            resellerModal.loading();
+            const msg = await HttpUtil.post('/panel/resellers/add', resellerModal.toPayload(reseller));
+            resellerModal.loading(false);
+            if (msg && msg.success) {
+              resellerModal.close();
+              await this.loadResellers();
+            }
+          },
+        });
+      },
+      openEdit(reseller) {
+        resellerModal.show({
+          title: '{{ i18n "pages.resellers.edit" }}',
+          allInbounds: this.allInbounds,
+          reseller,
+          isEdit: true,
+          confirm: async (edited) => {
+            resellerModal.loading();
+            const msg = await HttpUtil.post('/panel/resellers/update/' + reseller.id, resellerModal.toPayload(edited));
+            resellerModal.loading(false);
+            if (msg && msg.success) {
+              resellerModal.close();
+              await this.loadResellers();
+            }
+          },
+        });
+      },
+      openRecharge(reseller) {
+        this.recharge = {
+          visible: true,
+          confirmLoading: false,
+          id: reseller.id,
+          username: reseller.username,
+          availableBytes: Number(reseller.availableBytes) || 0,
+          gb: 0,
+        };
+      },
+      async submitRecharge() {
+        const gb = Number(this.recharge.gb) || 0;
+        if (gb === 0) {
+          this.recharge.visible = false;
+          return;
+        }
+        this.recharge.confirmLoading = true;
+        const msg = await HttpUtil.post('/panel/resellers/recharge/' + this.recharge.id, { gb });
+        this.recharge.confirmLoading = false;
+        if (msg && msg.success) {
+          this.recharge.visible = false;
+          await this.loadResellers();
+        }
+      },
+      delReseller(reseller) {
+        // Still owns accounts: ask whether to delete them too or hand them back to
+        // the admin. Otherwise delete straight away.
+        if (reseller.clientCount > 0) {
+          this.del = {
+            visible: true, confirmLoading: false, id: reseller.id,
+            username: reseller.username, clientCount: reseller.clientCount, mode: 'keep',
+          };
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.resellers.del" }}' + ': ' + reseller.username,
+          content: '{{ i18n "pages.resellers.deleteConfirm" }}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "delete" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            const msg = await HttpUtil.post('/panel/resellers/del/' + reseller.id);
+            if (msg && msg.success) await this.loadResellers();
+          },
+        });
+      },
+      async submitDelete() {
+        this.del.confirmLoading = true;
+        const msg = await HttpUtil.post('/panel/resellers/del/' + this.del.id, { mode: this.del.mode });
+        this.del.confirmLoading = false;
+        if (msg && msg.success) {
+          this.del.visible = false;
+          await this.loadResellers();
+        }
+      },
+    },
+    async mounted() {
+      await this.loadInbounds();
+      await this.loadResellers(true);
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

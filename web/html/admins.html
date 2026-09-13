@@ -1,0 +1,223 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+{{template "page/shell_start" . }}
+      <a-spin :spinning="spinning" :delay="300" tip='{{ i18n "loading"}}' size="large">
+        <transition name="list" appear>
+          <a-row :gutter="[16, 16]" :style="{ margin: 0 }">
+            <a-col :span="24">
+              <a-card hoverable :style="{ marginBottom: '16px' }">
+                <div :style="{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }">
+                  <a-button type="primary" icon="plus" @click="openAdd()">
+                    {{ i18n "pages.admins.add" }}
+                  </a-button>
+                  <a-button icon="reload" @click="loadAdmins(true)"></a-button>
+                </div>
+              </a-card>
+
+              <a-card hoverable :bodyStyle="{ padding: 0 }">
+                <a-table :columns="columns" :row-key="r => r.id" :data-source="admins"
+                  :scroll="isMobile ? {} : { x: 700 }" :pagination="false" bordered
+                  :locale='{ emptyText: `{{ i18n "noData" }}` }'>
+
+                  <template slot="username" slot-scope="text, admin">
+                    <span>[[ admin.username ]]</span>
+                    <a-tag v-if="admin.isSuperAdmin" color="purple" :style="{ marginLeft: '6px' }">
+                      {{ i18n "pages.admins.superAdmin" }}
+                    </a-tag>
+                  </template>
+
+                  <template slot="enable" slot-scope="text, admin">
+                    <a-tag :color="admin.enable ? 'green' : 'red'">
+                      [[ admin.enable ? '{{ i18n "enabled" }}' : '{{ i18n "disabled" }}' ]]
+                    </a-tag>
+                  </template>
+
+                  <template slot="twoFactor" slot-scope="text, admin">
+                    <a-icon v-if="admin.twoFactorEnable" type="lock" :style="{ color: '#52c41a' }"></a-icon>
+                    <span v-else :style="{ color: '#8c8c8c' }">{{ i18n "none" }}</span>
+                  </template>
+
+                  <template slot="inboundAccess" slot-scope="text, admin">
+                    <span v-if="admin.isSuperAdmin" :style="{ color: '#8c8c8c' }">{{ i18n "all" }}</span>
+                    <span v-else>[[ admin.inboundIds.length ]]</span>
+                  </template>
+
+                  <template slot="permissions" slot-scope="text, admin">
+                    <span v-if="admin.isSuperAdmin" :style="{ color: '#8c8c8c' }">
+                      {{ i18n "pages.admins.superAdminDesc" }}
+                    </span>
+                    <span v-else-if="!admin.permissions.length" :style="{ color: '#8c8c8c' }">
+                      {{ i18n "none" }}
+                    </span>
+                    <template v-else>
+                      <a-tag v-for="slug in admin.permissions" :key="slug" :style="{ margin: '2px' }">
+                        [[ permLabel(slug) ]]
+                      </a-tag>
+                    </template>
+                  </template>
+
+                  <template slot="action" slot-scope="text, admin">
+                    <a-dropdown :trigger="['click']">
+                      <a-icon @click="e => e.preventDefault()" type="more"
+                        :style="{ fontSize: '16px', textDecoration: 'bold' }"></a-icon>
+                      <a-menu slot="overlay" :theme="themeSwitcher.currentTheme">
+                        <a-menu-item @click="openEdit(admin)">
+                          <a-icon type="edit"></a-icon>
+                          <span>{{ i18n "edit" }}</span>
+                        </a-menu-item>
+                        <a-menu-item v-if="admin.inboundCount > 0" @click="openReassign(admin)">
+                          <a-icon type="swap"></a-icon>
+                          <span>{{ i18n "pages.admins.reassign" }}</span>
+                        </a-menu-item>
+                        <a-menu-item :disabled="admin.id === currentAdminId" @click="delAdmin(admin)">
+                          <span :style="{ color: admin.id === currentAdminId ? undefined : 'var(--error)' }">
+                            <a-icon type="delete"></a-icon>
+                            <span>{{ i18n "delete" }}</span>
+                          </span>
+                        </a-menu-item>
+                      </a-menu>
+                    </a-dropdown>
+                  </template>
+                </a-table>
+              </a-card>
+            </a-col>
+          </a-row>
+        </transition>
+      </a-spin>
+{{template "page/shell_end" . }}
+
+{{template "page/body_scripts" .}}
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "modals/adminModal" .}}
+
+<script>
+  const columns = [
+    { title: '{{ i18n "pages.admins.username" }}', align: 'center', width: 90, scopedSlots: { customRender: 'username' } },
+    { title: '{{ i18n "pages.admins.nickname" }}', dataIndex: 'nickname', align: 'center', width: 70 },
+    { title: '{{ i18n "status" }}', align: 'center', width: 50, scopedSlots: { customRender: 'enable' } },
+    { title: '{{ i18n "pages.admins.twoFactor" }}', align: 'center', width: 45, scopedSlots: { customRender: 'twoFactor' } },
+    { title: '{{ i18n "pages.admins.inboundAccess" }}', align: 'center', width: 45, scopedSlots: { customRender: 'inboundAccess' } },
+    { title: '{{ i18n "pages.admins.permissions" }}', align: 'left', width: 180, scopedSlots: { customRender: 'permissions' } },
+    { title: '', align: 'center', width: 30, scopedSlots: { customRender: 'action' } },
+  ];
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    mixins: [MediaQueryMixin],
+    el: '#app',
+    data: {
+      themeSwitcher,
+      pageTitle: '{{ i18n "menu.admins"}}',
+      pageClass: '',
+      spinning: false,
+      admins: [],
+      // Permission slugs come from the server rather than a hard-coded copy, so the
+      // UI can never offer a permission this build does not enforce.
+      allPermissions: [],
+      allInbounds: [],
+      currentAdminId: {{ .me }},
+      columns,
+    },
+    methods: {
+      async loadAdmins(showSpin) {
+        if (showSpin) this.spinning = true;
+        const msg = await HttpUtil.get('/panel/admins/list');
+        this.spinning = false;
+        if (!msg || !msg.success) return;
+        this.admins = msg.obj || [];
+      },
+      async loadPermissions() {
+        const msg = await HttpUtil.get('/panel/admins/permissions');
+        if (msg && msg.success) this.allPermissions = (msg.obj || []).map(p => p.slug);
+      },
+      async loadInbounds() {
+        const msg = await HttpUtil.get('/panel/admins/inbounds');
+        if (msg && msg.success) this.allInbounds = msg.obj || [];
+      },
+      permLabel(slug) {
+        return PERMISSION_LABELS[slug] || slug;
+      },
+      openAdd() {
+        adminModal.show({
+          title: '{{ i18n "pages.admins.add" }}',
+          allPermissions: this.allPermissions,
+          allInbounds: this.allInbounds,
+          isEdit: false,
+          confirm: async (admin) => {
+            adminModal.loading();
+            const msg = await HttpUtil.post('/panel/admins/add', adminModal.toPayload(admin));
+            adminModal.loading(false);
+            if (msg && msg.success) {
+              adminModal.close();
+              await this.loadAdmins();
+            }
+          },
+        });
+      },
+      openEdit(admin) {
+        adminModal.show({
+          title: '{{ i18n "pages.admins.edit" }}',
+          allPermissions: this.allPermissions,
+          allInbounds: this.allInbounds,
+          admin,
+          isEdit: true,
+          confirm: async (edited) => {
+            adminModal.loading();
+            const msg = await HttpUtil.post('/panel/admins/update/' + admin.id, adminModal.toPayload(edited));
+            adminModal.loading(false);
+            if (msg && msg.success) {
+              adminModal.close();
+              await this.loadAdmins();
+            }
+          },
+        });
+      },
+      openReassign(admin) {
+        // An admin who still owns inbounds cannot be deleted: those inbounds would be
+        // invisible to everyone while their daemons kept running. Hand them over first.
+        const others = this.admins.filter(a => a.id !== admin.id);
+        if (!others.length) return;
+        let targetId = others[0].id;
+        this.$confirm({
+          title: '{{ i18n "pages.admins.reassign" }}',
+          content: (h) => h('div', [
+            h('p', '{{ i18n "pages.admins.reassignDesc" }}'),
+            h('a-select', {
+              props: { defaultValue: targetId, style: 'width: 100%' },
+              on: { change: (v) => { targetId = v; } },
+            }, others.map(a => h('a-select-option', { props: { value: a.id } }, a.username))),
+          ]),
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "confirm" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            const msg = await HttpUtil.post(`/panel/admins/reassign/${admin.id}/${targetId}`);
+            if (msg && msg.success) await this.loadAdmins();
+          },
+        });
+      },
+      delAdmin(admin) {
+        this.$confirm({
+          title: '{{ i18n "pages.admins.del" }}' + ': ' + admin.username,
+          content: '{{ i18n "pages.admins.deleteConfirm" }}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "delete" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            const msg = await HttpUtil.post('/panel/admins/del/' + admin.id);
+            if (msg && msg.success) await this.loadAdmins();
+          },
+        });
+      },
+    },
+    async mounted() {
+      await this.loadPermissions();
+      await this.loadInbounds();
+      await this.loadAdmins(true);
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

@@ -1,0 +1,66 @@
+# Ignore editor and IDE settings
+.idea/
+.vscode/
+.cache/
+.sync*
+
+# Ignore log files
+*.log
+
+# Ignore temporary files
+tmp/
+*.tar.gz
+
+# Ignore build and distribution directories
+backup/
+bin/
+dist/
+release/
+node_modules/
+
+# Ignore compiled binaries
+main
+
+# Ignore script and executable files
+/release.sh
+/x-ui
+
+# Ignore OS specific files
+.DS_Store
+Thumbs.db
+
+# Ignore Go build files
+*.exe
+x-ui.db
+
+# Ignore Docker specific files
+docker-compose.override.yml
+
+# Ignore .env (Environment Variables) file
+.env
+# Local build artifact (never commit)
+/vpn-ui
+/vpn-ui.bak.*
+/build/out/
+
+# caveman plugin tooling (not project code)
+.agents/
+skills-lock.json
+
+# Bundled Xray core + base geo files (built by build/core/build.sh, embedded via
+# go:embed at build time) — large artifacts, never commit them.
+corebundle/core/*
+!corebundle/core/.gitkeep
+
+# Runtime state + local working dirs (regenerate on run/test — never commit).
+# vpn-ui.db holds panel credentials; the old x-ui.db rule missed it post-rebrand.
+/vpn-ui.db
+/bino/
+/host_logs/
+/test_unit/test_subject/
+/test_unit/results/
+__pycache__/
+*.pyc
+
+# Local-only project notes — keep on disk, never commit.
+/MEMORY.md

@@ -1,0 +1,321 @@
+{{define "modals/greConfigModal"}}
+<!--
+  GRE router setup, per account.
+
+  Deliberately NOT a QR/config-file modal like its wg-c/awg siblings: GRE's client is a
+  ROUTER, so there is no app to import a profile and nothing to scan. The deliverable is
+  the handful of values the router's own web UI asks for, plus a copy-pasteable RouterOS
+  recipe, both rendered server-side so what the operator reads is exactly what the data
+  plane built.
+-->
+<a-modal id="gre-config-modal" v-model="greConfigModal.visible" :title="greConfigModal.title"
+         :closable="true" :mask-closable="false" :footer="null" width="720px" class="gre-cfg-modal">
+  <a-spin :spinning="greConfigModal.loading">
+    <div v-if="!greConfigModal.loading && greConfigModal.peers.length === 0"
+         :style="{ padding: '24px 0', textAlign: 'center', color: '#888' }">
+      This account has no peer slots yet. Add the customer's router IP on the client, or
+      leave it blank for a dynamic address, then save the inbound.
+    </div>
+    <div v-for="(peer, index) in greConfigModal.peers" :key="index" class="gre-cfg-peer">
+      <a-divider v-if="greConfigModal.peers.length > 1">
+        [[ peer.remark || ('Peer ' + (peer.peerIndex + 1)) ]]
+      </a-divider>
+      <a-row :gutter="8" :style="{ marginBottom: '8px' }">
+        <a-col :xs="24" :md="12" :style="{ marginBottom: '8px' }">
+          <div :style="{ marginBottom: '4px', color: '#888' }">Server address (their "remote")</div>
+          <a-input :value="peer.serverIp" read-only @click="copy(peer.serverIp)"></a-input>
+        </a-col>
+        <a-col :xs="24" :md="12" :style="{ marginBottom: '8px' }">
+          <div :style="{ marginBottom: '4px', color: '#888' }">Their tunnel address</div>
+          <a-input :value="peer.innerIp" read-only @click="copy(peer.innerIp)"></a-input>
+        </a-col>
+        <a-col :xs="24" :md="12" :style="{ marginBottom: '8px' }">
+          <div :style="{ marginBottom: '4px', color: '#888' }">Gateway (their default route)</div>
+          <a-input :value="peer.gatewayIp" read-only @click="copy(peer.gatewayIp)"></a-input>
+        </a-col>
+        <a-col :xs="24" :md="12" :style="{ marginBottom: '8px' }">
+          <div :style="{ marginBottom: '4px', color: '#888' }">Their public IP</div>
+          <a-input
+            :value="peer.dynamic ? 'dynamic (learned)' : peer.peerIp"
+            read-only
+          ></a-input>
+        </a-col>
+      </a-row>
+      <a-alert
+        v-if="peer.mode === 'raw'"
+        type="warning"
+        show-icon
+        :style="{ marginBottom: '8px' }"
+        message="Unencrypted: this tunnel carries cleartext."
+      ></a-alert>
+      <a-alert
+        v-else-if="peer.mode === 'ipsec'"
+        type="success"
+        show-icon
+        :style="{ marginBottom: '8px' }"
+        message="IPsec required: bare GRE from this customer will be dropped."
+      ></a-alert>
+      <a-alert
+        v-else
+        type="info"
+        show-icon
+        :style="{ marginBottom: '8px' }"
+        message="IPsec optional: both encrypted and bare GRE are accepted."
+      ></a-alert>
+      <a-form-item v-if="peer.ipsecPsk" :style="{ marginBottom: '8px' }">
+        <div :style="{ marginBottom: '4px', color: '#888' }">IPsec pre-shared key</div>
+        <a-input :value="peer.ipsecPsk" read-only @click="copy(peer.ipsecPsk)"></a-input>
+      </a-form-item>
+
+      <!-- Another vpn-ui panel dialling this inbound as a GRE OUTBOUND.
+
+           This is a different question from the two recipes below, which set up a
+           router. The far side here is a panel with thirteen labelled boxes, and
+           five of the values they need were computed by the server, returned in
+           this very payload, and rendered nowhere: the tunnel address needed its
+           mask, and the MTU, the FOU switch, the FOU port and the IKE identity
+           appeared only as digits buried inside the shell recipe, if at all.
+
+           Three more were shown under names the other form does not use, so even
+           the visible ones had to be guessed at: one value is called the gateway
+           here, the Remote Tunnel Address in the recipe and the Peer Tunnel Address
+           over there.
+
+           So this lists the far side's boxes, by ITS labels, in ITS order, each
+           with the value to paste or an explicit "leave blank". A box that must
+           stay empty is worth a row: blank is a decision here, not an omission. -->
+      <div class="gre-out">
+        <div class="gre-out-h">
+          <b>Point another vpn-ui panel at this inbound</b>
+          <span>its Outbound form, box by box</span>
+        </div>
+        <div class="gre-out-row" v-for="f in greConfigModal.outboundFields(peer)" :key="f.label"
+          :class="{ 'gre-out-row--blank': !f.value }">
+          <div class="gre-out-k">[[ f.label ]]</div>
+          <div class="gre-out-v" v-if="f.value" @click="copy(f.value)">
+            <span>[[ f.value ]]</span>
+            <a-icon type="copy"></a-icon>
+          </div>
+          <div class="gre-out-v gre-out-v--none" v-else>[[ f.blank || 'leave blank' ]]</div>
+          <div class="gre-out-n" v-if="f.note">[[ f.note ]]</div>
+        </div>
+      </div>
+      <!-- One section per platform rather than a single blob: the customer runs exactly one
+           of them, and RouterOS syntax pasted into a shell (or the reverse) fails in ways
+           that look like the tunnel is broken. -->
+      <div :style="{ marginBottom: '4px', color: '#888' }">
+        MikroTik RouterOS setup (click to copy)
+      </div>
+      <a-textarea
+        :value="peer.configMikrotik"
+        read-only
+        :auto-size="{ minRows: 6, maxRows: 22 }"
+        @click="copy(peer.configMikrotik)"
+        :style="{ fontFamily: 'monospace', fontSize: '12px' }"
+      ></a-textarea>
+      <a-button
+        type="primary"
+        :style="{ marginTop: '8px' }"
+        @click="download(peer, 'mikrotik')"
+      >Download .txt</a-button>
+
+      <div :style="{ margin: '16px 0 4px', color: '#888' }">
+        Linux setup (click to copy)
+      </div>
+      <a-textarea
+        :value="peer.configLinux"
+        read-only
+        :auto-size="{ minRows: 6, maxRows: 22 }"
+        @click="copy(peer.configLinux)"
+        :style="{ fontFamily: 'monospace', fontSize: '12px' }"
+      ></a-textarea>
+      <a-button
+        type="primary"
+        :style="{ marginTop: '8px' }"
+        @click="download(peer, 'linux')"
+      >Download .txt</a-button>
+    </div>
+    {{ template "component/aSubBlock" "gre" }}
+  </a-spin>
+</a-modal>
+
+<script>
+  const greConfigModal = {
+    visible: false,
+    loading: false,
+    title: "",
+    dbInboundId: 0,
+    email: "",
+    subId: "",
+    peers: [],
+    show(dbInboundId, client) {
+      greConfigModal.dbInboundId = dbInboundId;
+      greConfigModal.email = client ? client.email : "";
+      greConfigModal.subId = client ? client.subId : "";
+      greConfigModal.title = "GRE Setup" + (greConfigModal.email ? " - " + greConfigModal.email : "");
+      greConfigModal.peers = [];
+      greConfigModal.visible = true;
+      greConfigModalApp.fetchConfigs();
+    },
+    close() {
+      greConfigModal.visible = false;
+    },
+
+    // The far side's Outbound form, box by box, in its order and under its labels
+    // (web/assets/js/model/outbound.js, the `gre` block, resolved through
+    // vpnLabel()). Every value here is already in the payload this modal fetched;
+    // what was missing was the translation between the two vocabularies.
+    outboundFields(peer) {
+      if (!peer) return [];
+      // The inbound stores IPsec and raw as two independent booleans and collapses
+      // them into a three-state string at render time; the outbound has one switch.
+      // "ipsec-or-raw" accepts either, so the honest instruction is "either works".
+      const ipsec = peer.mode === 'ipsec' || peer.mode === 'ipsec-or-raw';
+      const fou = (peer.fouPort || 0) > 0;
+      const rows = [
+        { label: 'Server Address', value: peer.serverIp,
+          note: 'this panel, as the far side reaches it' },
+        { label: 'Local Address', value: '',
+          blank: 'leave blank on a single-homed host',
+          note: 'the far side’s OWN outer address. It cannot be read off this '
+              + 'panel: paste the far side’s public address into the Peer IP box '
+              + 'of this account instead, or leave both blank and let this inbound '
+              + 'learn the peer from arriving traffic (raw GRE only, never under FOU).' },
+        // The mask is the fix, not decoration. The outbound's own placeholder
+        // teaches 10.11.0.2/30, the classic point-to-point pair, and this panel
+        // assigns a /32 out of the account's block: a /30 pasted there claims three
+        // addresses that belong to other accounts.
+        { label: 'Tunnel Address', value: peer.innerIp ? peer.innerIp + '/32' : '',
+          note: 'a /32 out of this account’s block, not a /30 pair' },
+        { label: 'Peer Tunnel Address', value: peer.gatewayIp,
+          note: 'shown as the gateway above; this inbound’s end of the tunnel' },
+        { label: 'TTL', value: '', blank: 'leave blank',
+          note: 'outer TTL is per-side and does not have to match' },
+        { label: 'MTU', value: peer.mtu ? String(peer.mtu) : '',
+          blank: 'leave blank, both sides derive the same value',
+          note: peer.mtu ? 'this inbound’s effective MTU' : '' },
+        { label: 'FOU Encapsulation', value: fou ? 'on' : '',
+          blank: 'off',
+          note: fou ? 'this peer slot is pinned and wrapped in UDP'
+                    : 'this inbound is not using FOU for this peer' },
+        { label: 'FOU Port', value: fou && peer.fouPort ? String(peer.fouPort) : '',
+          blank: fou ? '' : 'not applicable while FOU is off' },
+        { label: 'IPsec', value: ipsec ? 'on' : '',
+          blank: 'off',
+          note: peer.mode === 'ipsec-or-raw'
+            ? 'this inbound accepts either, so on or off both work'
+            : (ipsec ? 'required: bare GRE from this peer is dropped' : 'this inbound expects bare GRE') },
+        { label: 'IPsec Pre-Shared Key', value: ipsec ? (peer.ipsecPsk || '') : '',
+          blank: ipsec ? '' : 'not applicable while IPsec is off' },
+        // Load-bearing on a shared charon holding several PSKs: without it the far
+        // side cannot say which key this tunnel is meant to use.
+        { label: 'IPsec Remote ID', value: ipsec ? (peer.ipsecId || '') : '',
+          blank: ipsec ? '' : 'not applicable while IPsec is off',
+          note: ipsec ? 'the identity THIS panel presents' : '' },
+        { label: 'IPsec Local ID', value: '', blank: 'leave blank',
+          note: 'this inbound accepts any identity from the peer' },
+        { label: 'IKE Version', value: '', blank: 'Automatic',
+          note: 'this inbound answers IKEv1 or IKEv2' },
+      ];
+      // A row whose value AND explanation are both empty says nothing.
+      return rows.filter(r => r.value || r.blank);
+    },
+  };
+
+  const greConfigModalApp = new Vue({
+    delimiters: ["[[", "]]"],
+    el: "#gre-config-modal",
+    data: {
+      greConfigModal: greConfigModal,
+    },
+    computed: {
+      // What component/aSubBlock reads. The account's subId is read FIRST and
+      // unconditionally: a computed only re-runs when a dependency it actually touched
+      // changes, so guarding on app.subSettings ahead of it would short-circuit before Vue
+      // ever recorded subId as a dependency, and the '' cached at page load would never be
+      // invalidated when a modal opened. See the awg modal for the same note.
+      subId() {
+        const subId = greConfigModal.subId;
+        const subEnabled = !!(typeof app !== 'undefined' && app.subSettings && app.subSettings.enable);
+        return subEnabled ? subId : '';
+      },
+      subLink() {
+        return this.subId ? app.subSettings.subURI + this.subId : '';
+      },
+      subJsonLink() {
+        return this.subId && app.subSettings.subJsonEnable
+          ? app.subSettings.subJsonURI + this.subId : '';
+      },
+    },
+    methods: {
+      async fetchConfigs() {
+        greConfigModal.loading = true;
+        try {
+          // GET, matching the route. And no {{ .base_path }} prefix: axios' baseURL is
+          // already global, so prefixing here would double it and 404.
+          const msg = await HttpUtil.get(
+            '/panel/api/inbounds/' + greConfigModal.dbInboundId + '/gre-configs',
+            { email: greConfigModal.email }
+          );
+          greConfigModal.peers = (msg && msg.success && Array.isArray(msg.obj)) ? msg.obj : [];
+        } catch (e) {
+          console.error('Failed to load GRE configs:', e);
+          greConfigModal.peers = [];
+        } finally {
+          greConfigModal.loading = false;
+        }
+      },
+      copy(text) {
+        if (!text) return;
+        ClipboardManager.copyText(text).then(() => {
+          app.$message.success('{{ i18n "copied" }}');
+        });
+      },
+      // platform is 'mikrotik' or 'linux': one file per recipe, matching the two sections.
+      download(peer, platform) {
+        const text = platform === 'linux' ? peer.configLinux : peer.configMikrotik;
+        if (!text) return;
+        const base = greConfigModal.email || 'client';
+        const suffix = greConfigModal.peers.length > 1 ? '-peer' + (peer.peerIndex + 1) : '';
+        const name = base + suffix + '-gre-' + platform + '.txt';
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+      // a-modal portals its body to the document root, so these are looked up on the
+      // document rather than through this.$el.
+      qr(selector, value) {
+        const el = document.querySelector(selector);
+        if (!el || !value) return;
+        new QRious({
+          element: el,
+          size: 360,
+          value: value,
+          background: 'white',
+          backgroundAlpha: 1,
+          foreground: 'black',
+          padding: 8,
+          level: 'L',
+        });
+      },
+      renderQrs() {
+        // Only the subscription QRs: a GRE peer's setup is a block of router settings, not
+        // a scannable link, so there is nothing per-peer to encode.
+        this.qr('#gre-sub-qr', this.subLink);
+        this.qr('#gre-subjson-qr', this.subJsonLink);
+      },
+    },
+    updated() {
+      if (this.greConfigModal.visible && !this.greConfigModal.loading) {
+        this.$nextTick(() => this.renderQrs());
+      }
+    },
+  });
+</script>
+{{end}}

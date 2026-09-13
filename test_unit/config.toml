@@ -1,0 +1,82 @@
+# vpn-ui test unit config. Paths are relative to test_unit/ unless absolute.
+
+binary = "test_subject/vpn-ui"              # panel binary in test_subject/ (+ its bin/)
+concurrency = 2                            # distros at once; 2 safe on 31Gi, 5+ oversubscribes
+client_image = "images:ubuntu/24.04/cloud"  # all client VMs (ubuntu-24 for the AmneziaWG DKMS-on-client build; was 26.04)
+keep_failed_vms = false                     # keep a failed job's VMs for post-mortem
+
+# Distro matrix. enabled = false (or --only) skips one.
+servers = [
+  {name = "ubuntu-24", image = "images:ubuntu/24.04/cloud",  enabled = true},
+  {name = "ubuntu-26", image = "images:ubuntu/26.04/cloud",  enabled = true},
+  {name = "debian-12", image = "images:debian/12/cloud",     enabled = true},
+  {name = "debian-13", image = "images:debian/13/cloud",     enabled = true},
+  {name = "fedora-43", image = "images:fedora/43/cloud",     enabled = true},
+  {name = "fedora-44", image = "images:fedora/44/cloud",     enabled = true},
+  # AlmaLinux 8 / Rocky Linux 8 (EL8) dropped: bundled strongSwan (IKEv2) setup fails there.
+  {name = "alma-9",    image = "images:almalinux/9/cloud",   enabled = true},
+  {name = "alma-10",   image = "images:almalinux/10/cloud",  enabled = true},
+  {name = "rocky-9",   image = "images:rockylinux/9/cloud",  enabled = true},
+  {name = "rocky-10",  image = "images:rockylinux/10/cloud", enabled = true},
+  {name = "centos-9",  image = "images:centos/9-Stream/cloud", enabled = true},
+  {name = "centos-10", image = "images:centos/10-Stream/cloud", enabled = true},
+  {name = "arch",      image = "images:archlinux/cloud",     enabled = true},
+]
+
+[panel]                    # defaults match the binary
+port = 2083
+username = "admin"
+password = "admin"
+base_path = "/"
+scheme = "http"
+
+[vm]
+agent_timeout = 300        # wait for the incus-agent
+panel_timeout = 300        # wait for the panel on :port
+provision_timeout = 1200   # wait for provisioning
+
+[vm.server]
+cpu = 1
+memory = "2GiB"
+
+[vm.client]
+cpu = 1
+memory = "1GiB"
+
+[dns_leak]
+api_base = "https://bash.ws"
+
+[dns_resolve]
+domain = "cloudflare.com"  # dig +short through the tunnel
+
+# IKEv2 auth modes to exercise in the ikev2 phase. eap-mschapv2 = the full primary
+# suite (connect variants + checks + user-limit/strategy/traffic). Each OTHER listed
+# mode gets its own single-account inbound plus a connect + dns-resolve + tunnel-egress
+# + internet subtest block (named e.g. psk-connect / eap-tls-internet). Remove a mode
+# to skip it; omit this whole section to run only eap-mschapv2 (historical behaviour).
+[ikev2]
+modes = ["eap-mschapv2", "psk", "eap-tls"]
+
+# Traffic accounting on account A; *_mb pulled via HTTP range off a big file.
+[traffic_test]
+usage_mb = 15              # "counted correctly" download
+multi_user_mb = 8          # per-device for K-device aggregation (pulled N times, keep small)
+limit_mb = 15              # account limit for the termination test (low so the VM tunnel's
+                           # variable throughput reliably trips it; the mechanism, not the
+                           # magnitude, is what's under test — a broken limit fails to disable
+                           # regardless of size). Was 100MB → flaky N/A when the tunnel was slow.
+over_mb = 50               # download to exceed the limit (> limit_mb)
+# Traffic Multiplier phase (runs per protocol). The multiplier is deliberately
+# large: counted bytes differ from downloaded bytes by 0.5x-3x depending on the
+# protocol's encapsulation, so a 2x policy would sit inside that noise and prove
+# nothing. At 10x, weighted traffic is unmistakable. Keep multiplier_after_mb well
+# below multiplier_mb so most of the transfer is past the threshold.
+multiplier_mb = 10         # download for the multiplier test
+multiplier_after_mb = 2    # threshold past which traffic is weighted
+multiplier = 10            # weight applied past the threshold
+settle_timeout = 40        # seconds to poll the counter / auto-disable flag
+urls = [
+  "https://proof.ovh.net/files/1Gb.dat",
+  "https://ash-speed.hetzner.com/1GB.bin",
+  "http://speedtest.tele2.net/1GB.zip",
+]

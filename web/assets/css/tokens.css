@@ -1,0 +1,286 @@
+/*
+ * tokens.css - the design-system layer for the panel redesign.
+ *
+ * Loaded BEFORE custom.css. This file defines vocabulary only: it declares
+ * custom properties and a handful of direction utilities, and styles no
+ * component. Nothing here can change how the current panel renders.
+ *
+ * Theme selectors match component/aThemeSwitch.html exactly:
+ *   light        :root            (default; body also carries class="light")
+ *   dark         body.dark        (localStorage 'dark-mode', defaults to true)
+ *   ultra-dark   html[data-theme='ultra-dark'] body.dark
+ *                (localStorage 'isUltraDarkThemeEnabled', independent of the
+ *                 dark/light flag, so it is scoped to the dark pairing only)
+ *
+ * Note that aThemeSwitch does setAttribute('class', theme) on <body>, which
+ * REPLACES the whole class list. Never expect another class to survive there.
+ *
+ * The legacy --dark-color-* palette in custom.css is deliberately NOT aliased
+ * to these tokens yet. See "deferred alias map" at the foot of this file.
+ */
+
+/* ------------------------------------------------------------------ *
+ * 1. Non-colour tiers. Theme-independent.
+ *    The mockups in redesign/ hardcode every dimension; these are the
+ *    scales recovered from them.
+ * ------------------------------------------------------------------ */
+
+:root {
+  /* spacing */
+  --sp-1:4px;
+  --sp-2:8px;
+  --sp-3:12px;
+  --sp-4:16px;
+  --sp-5:20px;
+  --sp-6:24px;
+  --sp-8:32px;
+  --sp-10:40px;
+
+  /* grid gutters, as used by the bento mosaic at its three breakpoints */
+  --gap-sm:12px;
+  --gap-md:13px;
+  --gap-lg:12px;
+
+  /* radii */
+  --radius-sm:8px;
+  --radius-md:10px;
+  --radius-lg:12px;
+  --radius-xl:16px;
+  --radius-pill:999px;
+
+  /* type. Vazirmatn is @font-face'd in common/page.html and carries the
+     Persian and Arabic locales; keep it ahead of the system stack. */
+  --font-sans:'Vazirmatn UI NL',-apple-system,BlinkMacSystemFont,'Segoe UI',
+              system-ui,Roboto,'Helvetica Neue',Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,
+              'Liberation Mono',monospace;
+
+  --fs-xs:11px;
+  --fs-sm:12.5px;
+  --fs-base:14px;
+  --fs-md:16px;
+  --fs-lg:20px;
+  --fs-xl:26px;
+
+  --fw-normal:400;
+  --fw-medium:500;
+  --fw-semibold:600;
+  --fw-bold:700;
+
+  --lh-tight:1.2;
+  --lh-base:1.5;
+
+  /* motion. Consumed via var() so the anti-flicker guard below can zero
+     them out without every component needing its own override. */
+  --dur-fast:.15s;
+  --dur-med:.25s;
+  --ease:cubic-bezier(.4,0,.2,1);
+}
+
+/* ------------------------------------------------------------------ *
+ * 2. Semantic colour - LIGHT (default)
+ *
+ *    Light mode has never had tokens: every custom property in custom.css
+ *    is --dark-color-*, so light has been stock ant-design. This block is
+ *    net-new.
+ * ------------------------------------------------------------------ */
+
+:root {
+  --bg:#f4f6f8;
+  --surface:#ffffff;
+  --surface-2:#eef2f4;
+  --border:#e4e9ee;
+  --border-strong:#d2dae1;
+
+  --text:#1b2430;          /* 15.65:1 on --surface */
+  --text-2:#5a6675;        /*  5.85:1 on --surface */
+  --text-3:#6b7787;        /*  4.55:1 on --surface - see contrast note */
+
+  /* Brand. --accent is the identity colour and is used for text, borders,
+     icons and rings. --accent-strong is ONLY for filled surfaces that carry
+     --on-accent text, where the brand green is fractionally too light. */
+  --accent:#008771;        /*  4.46:1 as text on --surface */
+  --accent-strong:#00806b; /*  4.88:1 behind white text */
+  --accent-weak:#e2f2ee;
+  --on-accent:#ffffff;
+
+  /* Status scale. RESERVED: these four encode state and nothing else, and
+     always ship with a text label, never colour alone.
+
+     Values are computed, not picked. Every one clears 4.5:1 as TEXT on this
+     surface (ant's stock #52c41a/#faad14 sit near 2:1 and were illegible on
+     the tinted pills this panel uses them in):
+       ok 5.36  warn 5.59  error 6.54  info 4.95  off 4.55
+     They are also muted relative to ant's defaults so they sit with the
+     teal/slate system instead of shouting over it. */
+  --ok:#1c7a45;
+  --info:#1f6fd0;
+  --warn:#8a6008;
+  --error:#b3261e;
+  --off:#6b7787;
+
+  --ok-weak:rgba(28,122,69,.10);
+  --info-weak:rgba(31,111,208,.10);
+  --warn-weak:rgba(138,96,8,.12);
+  --error-weak:rgba(179,38,30,.10);
+  --off-weak:rgba(107,119,135,.12);
+
+  --shadow-sm:0 1px 2px rgba(16,24,32,.05);
+  --shadow-md:0 6px 16px -6px rgba(16,24,32,.10),0 2px 5px rgba(16,24,32,.05);
+
+  color-scheme:light;
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. Semantic colour - DARK
+ *
+ *    Values match the existing --dark-color-* palette where they overlap
+ *    (--bg, --surface and --border are byte-identical to
+ *    --dark-color-background / -surface-100 / -surface-300), so dark mode
+ *    keeps its current identity.
+ *
+ *    Elevation is carried by borders, not shadows: both shadow tokens go
+ *    to none, exactly as the mockups do.
+ * ------------------------------------------------------------------ */
+
+body.dark {
+  --bg:#0a1222;
+  --surface:#151f31;
+  --surface-2:#1c2740;
+  --border:#2c3950;
+  --border-strong:#3c4b68;
+
+  --text:rgba(255,255,255,.88);     /* 12.97:1 on --surface */
+  --text-2:rgba(255,255,255,.60);   /*  6.68:1 on --surface */
+  --text-3:rgba(255,255,255,.48);   /*  4.81:1 on --surface */
+
+  --accent:#1bbf9f;
+  --accent-strong:#1bbf9f;          /* 7.70:1 behind --on-accent; no lift needed */
+  --accent-weak:rgba(27,191,159,.14);
+  --on-accent:#071a16;
+
+  /* Dark steps of the same reserved scale. Contrast as TEXT on --surface:
+     ok 8.44  warn 7.82  error 5.81  info 6.76  off 5.29 */
+  --ok:#4fd08d;
+  --info:#6fa8f5;
+  --warn:#e0a94a;
+  --error:#f2726a;
+  --off:#8593a8;
+
+  --ok-weak:rgba(79,208,141,.13);
+  --info-weak:rgba(111,168,245,.13);
+  --warn-weak:rgba(224,169,74,.14);
+  --error-weak:rgba(242,114,106,.13);
+  --off-weak:rgba(133,147,168,.15);
+
+  --shadow-sm:none;
+  --shadow-md:none;
+
+  color-scheme:dark;
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. Semantic colour - ULTRA-DARK
+ *
+ *    Hand-authored, not derived. Ultra-dark deliberately INVERTS the
+ *    surface relationship: normal dark puts cards lighter than the page
+ *    (#0a1222 bg / #151f31 card), ultra-dark puts them darker
+ *    (#21242a bg / #0c0e12 card). No lightness transform reproduces that,
+ *    so these are written out.
+ * ------------------------------------------------------------------ */
+
+html[data-theme='ultra-dark'] body.dark {
+  --bg:#21242a;
+  --surface:#0c0e12;
+  --surface-2:#222327;
+  --border:#32353b;
+  --border-strong:#505663;
+
+  --text:rgba(255,255,255,.85);
+  --text-2:rgba(255,255,255,.58);
+  --text-3:rgba(255,255,255,.48);   /* 5.02:1 on --surface */
+
+  --accent:#59cbac;
+  --accent-strong:#59cbac;
+  --accent-weak:rgba(89,203,172,.14);
+  --on-accent:#06140f;
+
+  --ok:#59cbac;
+  --info:#3c89e8;
+  --warn:#e89a3c;
+  --error:#e84749;
+  --off:#5a5f6b;
+
+  --ok-weak:rgba(89,203,172,.14);
+  --info-weak:rgba(60,137,232,.14);
+  --warn-weak:rgba(232,154,60,.16);
+  --error-weak:rgba(232,71,73,.14);
+  --off-weak:rgba(90,95,107,.18);
+}
+
+/* ------------------------------------------------------------------ *
+ * 5. Motion
+ *
+ *    data-theme-animations='off' is NOT a user preference. aThemeSwitch
+ *    sets it while the theme control is hovered and drops it on
+ *    mouseleave/touchend, to stop every transition firing at once during a
+ *    theme swap. Zeroing the duration tokens keeps new components in step
+ *    with that existing guard.
+ * ------------------------------------------------------------------ */
+
+html[data-theme-animations='off'] {
+  --dur-fast:0s;
+  --dur-med:0s;
+}
+
+@media (prefers-reduced-motion:reduce) {
+  :root {
+    --dur-fast:0s;
+    --dur-med:0s;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 6. Direction utilities
+ *
+ *    The panel ships Persian and Arabic. Flexbox and grid mirror on their
+ *    own, but a few classes of content must NOT mirror: a time axis reads
+ *    left-to-right in every locale, and bidi reordering mangles dotted and
+ *    colonned strings such as IPs, versions and MAC addresses.
+ *
+ *    Component CSS should use logical properties (margin-inline-start,
+ *    border-inline-end, text-align:start/end) rather than physical ones.
+ * ------------------------------------------------------------------ */
+
+.ltr-island {
+  direction:ltr;
+  unicode-bidi:isolate;
+}
+
+.tnum {
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:'tnum';
+}
+
+/* ------------------------------------------------------------------ *
+ * Deferred alias map
+ *
+ * The obvious next step is to point the legacy --dark-color-* names at
+ * these tokens so there is one source of truth. It is deliberately NOT
+ * done yet, for two reasons:
+ *
+ *   1. Only four legacy values map exactly (--dark-color-background,
+ *      -surface-100, -surface-300, -stroke). The rest differ: the mockups
+ *      run text brighter (.88 vs .75) and use a different --surface-2
+ *      (#1c2740 vs #222d42). Aliasing today would restyle all seven
+ *      existing pages at once, before any of them has been recomposed.
+ *
+ *   2. Custom properties resolve against the element that declares them.
+ *      Because the semantic tokens vary at body.dark while the legacy
+ *      names are declared at :root, a naive `--dark-color-x:var(--y)` on
+ *      :root would capture the LIGHT value and break dark mode. The alias
+ *      map has to be declared at body level.
+ *
+ * Do it per page as each one is recomposed, so every visual change lands
+ * with a page that was actually looked at.
+ * ------------------------------------------------------------------ */

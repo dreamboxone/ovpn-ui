@@ -1,0 +1,3584 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<style>
+  body.dark .custom-geo-section code.custom-geo-ext-code {
+    color: var(--dark-color-text-primary, rgba(255, 255, 255, 0.85));
+    background: var(--dark-color-surface-200, #222d42);
+    border: 1px solid var(--dark-color-stroke, #2c3950);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  html[data-theme="ultra-dark"] body.dark .custom-geo-section code.custom-geo-ext-code {
+    color: var(--dark-color-text-primary, rgba(255, 255, 255, 0.88));
+    background: var(--dark-color-surface-700, #111929);
+    border-color: var(--dark-color-stroke, #2c3950);
+  }
+</style>
+{{template "page/shell_start" . }}
+<a-spin :spinning="loadingStates.spinning" :delay="200" :tip="loadingTip" size="large">
+  <transition name="list" appear>
+    <a-alert type="error" v-if="showAlert && loadingStates.fetched" class="mb-10"
+      message='{{ i18n "secAlertTitle" }}' color="red" show-icon closable>
+      <template slot="description">
+        <div>{{ i18n "secAlertSsl" }}</div>
+        <a-button class="sec-alert-dismiss" size="small" @click="dismissSecAlert">{{ i18n "secAlertDismiss" }}</a-button>
+      </template>
+    </a-alert>
+  </transition>
+
+  <!-- Reserve the viewport height on first paint so the bento grid does not
+       pop in against a collapsed container. -->
+  <div v-if="!loadingStates.fetched" :style="{ minHeight: 'calc(100vh - 160px)' }"></div>
+
+  <div class="bo-bento" v-else>
+
+    <!-- ===== identity ===== -->
+    <article class="bo-tile bo-t-ident" aria-label='{{ i18n "pages.index.systemStatus" }}'>
+      <div class="bo-ident-top">
+        <!-- The mark is painted as a CSS mask rather than an <svg><use>, so the
+             brand colour lives in components.css (where dark mode can override
+             the few brands that vanish on a dark surface) and only the one
+             logo the machine actually needs is ever fetched. -->
+        <span class="bo-ident-logo bo-distro" :class="'bo-distro--' + distroKey"
+          :style="{ maskImage: distroMask, WebkitMaskImage: distroMask }"
+          role="img" :aria-label="status.osName || 'Linux'"></span>
+        <div class="bo-ident-name">
+          <div class="bo-ident-nameline">
+            <p class="bo-ident-os">[[ serverLabel ]]</p>
+            <!-- The rename relabels the panel for every admin and is offered
+                 nowhere but here, so it answers to the bit that lets this page act.
+                 It used to AND the panel-settings bit on top; that is gone because a
+                 reseller's derived mask carries no settings bit, so the AND made
+                 their AllowOverviewManage column inert. Without the bit the label is
+                 still shown, just not editable. -->
+            {{ if .perms.manageOverview }}
+            <button type="button" class="bo-ident-edit" @click="openRenameServer"
+              title='{{ i18n "edit" }}' aria-label='{{ i18n "edit" }}'>
+              <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-pencil"></use></svg>
+            </button>
+            {{ end }}
+          </div>
+          <p class="bo-ident-sub" v-if="status.osName">[[ status.osName ]] [[ status.osVersion ]]</p>
+        </div>
+      </div>
+
+      <!-- One labelled line per fact. Each row's icon is tinted so the eye can
+           find a row by colour before reading it. -->
+      <dl class="bo-spec">
+        <!-- Order is deliberate: where this panel egresses and how long the two
+             things that can independently restart (the panel, the machine) have
+             been up, then service health, then the hardware facts that never
+             change while we run. -->
+        <div class="bo-spec-row" v-if="panelLocationText">
+          <span class="bo-spec-ico bo-spec-ico--loc"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-globe"></use></svg></span>
+          <dt class="bo-spec-key">{{ i18n "pages.index.panelLocation" }}</dt>
+          <dd class="bo-spec-val" :class="{ 'bo-muted': panelLocationFailed }">[[ panelLocationText ]]</dd>
+        </div>
+        <!-- Two uptimes, not one. A panel restarted an hour ago on a host up for
+             months is worth seeing, and the single "Uptime" row this replaced
+             showed only the host's, so a panel that had crashed and come back
+             looked identical to one that had never stopped. -->
+        <div class="bo-spec-row">
+          <span class="bo-spec-ico bo-spec-ico--panel"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-shield"></use></svg></span>
+          <dt class="bo-spec-key">{{ i18n "pages.index.panelUptime" }}</dt>
+          <dd class="bo-spec-val num">[[ TimeFormatter.formatUptime(status.appUptime) ]]</dd>
+        </div>
+        <div class="bo-spec-row">
+          <span class="bo-spec-ico bo-spec-ico--os"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-server"></use></svg></span>
+          <dt class="bo-spec-key">{{ i18n "pages.index.serverUptime" }}</dt>
+          <dd class="bo-spec-val num">[[ TimeFormatter.formatUptime(status.uptime) ]]</dd>
+        </div>
+        {{ if .perms.accessCoreSettings }}
+        <div class="bo-spec-row">
+          <span class="bo-spec-ico bo-spec-ico--health"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-shield"></use></svg></span>
+          <dt class="bo-spec-key">{{ i18n "pages.index.vpnServices" }}</dt>
+          <dd class="bo-spec-val num" :class="allCoresHealthy ? 'bo-ok' : 'bo-warn'">[[ healthSummary ]]</dd>
+        </div>
+        {{ end }}
+        <div class="bo-spec-row" v-if="status.cpuModel">
+          <span class="bo-spec-ico bo-spec-ico--cpu"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-cpu"></use></svg></span>
+          <dt class="bo-spec-key">CPU</dt>
+          <dd class="bo-spec-val">[[ status.cpuModel ]]</dd>
+        </div>
+        <div class="bo-spec-row">
+          <span class="bo-spec-ico bo-spec-ico--cores"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-grid"></use></svg></span>
+          <dt class="bo-spec-key">Cores</dt>
+          <dd class="bo-spec-val num">[[ CPUFormatter.cpuCoreFormat(status.cpuCores) ]]<span v-if="status.cpuSpeedMhz"> at [[ CPUFormatter.cpuSpeedFormat(status.cpuSpeedMhz) ]]</span></dd>
+        </div>
+        <!-- Fitted memory, not the live usage the tile below graphs. The DDR
+             generation and clock come from SMBIOS and are simply absent on most
+             hypervisors, so this row shrinks to a bare capacity rather than
+             disappearing. -->
+        <div class="bo-spec-row" v-if="ramText">
+          <span class="bo-spec-ico bo-spec-ico--ram"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-ram"></use></svg></span>
+          <dt class="bo-spec-key">RAM</dt>
+          <dd class="bo-spec-val num">[[ ramText ]]</dd>
+        </div>
+        <div class="bo-spec-row" v-if="status.kernel">
+          <span class="bo-spec-ico bo-spec-ico--kernel"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-zap"></use></svg></span>
+          <dt class="bo-spec-key">Kernel</dt>
+          <dd class="bo-spec-val num">[[ status.kernel ]]</dd>
+        </div>
+        <!-- Whether this machine is a guest, and of what. Detected once per
+             panel start (it cannot change while we run), so a host that
+             reports nothing is bare metal rather than still being probed. -->
+        <div class="bo-spec-row">
+          <span class="bo-spec-ico bo-spec-ico--virt"><svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-box"></use></svg></span>
+          <dt class="bo-spec-key">{{ i18n "pages.index.virtualized" }}</dt>
+          <dd class="bo-spec-val">[[ virtText ]]</dd>
+        </div>
+      </dl>
+    </article>
+
+    <!-- ===== throughput ===== -->
+    <article class="bo-tile bo-t-flow" aria-label='{{ i18n "pages.index.overallSpeed" }}'>
+      <div class="bo-tile-head">
+        <h3 class="bo-tile-title">{{ i18n "pages.index.overallSpeed" }}</h3>
+        <!-- Interface picker. "All" is the default and sums every non-loopback
+             NIC, which is what the aggregate netIO already reports. -->
+        <span class="bo-iface-pick">
+          <a-select size="small" v-model="ifaceFilter" :style="{ minWidth: '120px' }"
+            :dropdown-class-name="themeSwitcher.currentTheme" @change="onIfaceChange">
+            <a-select-option value="">{{ i18n "all" }}</a-select-option>
+            <a-select-option v-for="n in ifaceNames" :key="n" :value="n">[[ n ]]</a-select-option>
+          </a-select>
+        </span>
+      </div>
+      <div class="bo-flow-cols">
+        <div class="bo-flow-col bo-flow-col--up">
+          <div class="bo-flow-label">
+            <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-arrow-up"></use></svg>
+            {{ i18n "pages.index.upload" }}
+          </div>
+          <div class="bo-flow-value num" aria-live="polite">
+            [[ SizeFormatter.sizeFormat(ifaceRate('up')) ]]<span class="bo-unit">/s</span>
+          </div>
+          <!-- height matches .bo-flow-chart's 96px in components.css. The prop said
+               130 while the CSS forced the <svg> to 96, and preserveAspectRatio="none"
+               squashed the whole plot to 74% of its intended height, thinning the
+               stroke vertically along with it. -->
+          <div class="bo-flow-chart">
+            <sparkline :data="history.up" :vb-width="420" :height="96" :autoscale="true" :log-scale="true"
+              :max-points="HISTORY_POINTS" :fill-opacity="0.14" :stroke="chartColors.accent"
+              :show-grid="false" :padding-left="2" :padding-right="2"
+              :padding-top="6" :padding-bottom="6" />
+          </div>
+        </div>
+        <div class="bo-flow-col bo-flow-col--down">
+          <div class="bo-flow-label">
+            <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-arrow-down"></use></svg>
+            {{ i18n "pages.index.download" }}
+          </div>
+          <div class="bo-flow-value num" aria-live="polite">
+            [[ SizeFormatter.sizeFormat(ifaceRate('down')) ]]<span class="bo-unit">/s</span>
+          </div>
+          <div class="bo-flow-chart">
+            <sparkline :data="history.down" :vb-width="420" :height="96" :autoscale="true" :log-scale="true"
+              :max-points="HISTORY_POINTS" :fill-opacity="0.14" :stroke="chartColors.info"
+              :show-grid="false" :padding-left="2" :padding-right="2"
+              :padding-top="6" :padding-bottom="6" />
+          </div>
+        </div>
+      </div>
+      <div class="bo-divider"></div>
+      <div class="bo-flow-footer">
+        <div class="bo-mini-stat">
+          <span class="bo-mini-stat-label">{{ i18n "pages.index.sent" }}</span>
+          <span class="bo-mini-stat-value num">[[ SizeFormatter.sizeFormat(status.netTraffic.sent) ]]</span>
+        </div>
+        <div class="bo-mini-stat bo-mini-stat--end">
+          <span class="bo-mini-stat-label">{{ i18n "pages.index.received" }}</span>
+          <span class="bo-mini-stat-value num">[[ SizeFormatter.sizeFormat(status.netTraffic.recv) ]]</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- ===== user status ===== -->
+    <article class="bo-tile bo-t-users" aria-label='{{ i18n "clients" }}'>
+      <div class="bo-tile-head"><h3 class="bo-tile-title">{{ i18n "clients" }}</h3></div>
+      <div class="bo-people">
+        <div class="bo-person bo-person--total">
+          <svg class="bo-person-ico" aria-hidden="true"><use href="#bo-i-user"></use></svg>
+          <span class="bo-person-val num">[[ userStats.total ]]</span>
+          <span class="bo-person-key">{{ i18n "pages.inbounds.totalUsers" }}</span>
+        </div>
+        <div class="bo-person bo-person--online">
+          <svg class="bo-person-ico" aria-hidden="true"><use href="#bo-i-user"></use></svg>
+          <span class="bo-person-val num">[[ userStats.online ]]</span>
+          <span class="bo-person-key">{{ i18n "online" }}</span>
+        </div>
+        <div class="bo-person bo-person--depleted">
+          <svg class="bo-person-ico" aria-hidden="true"><use href="#bo-i-user"></use></svg>
+          <span class="bo-person-val num">[[ userStats.depleted ]]</span>
+          <span class="bo-person-key">{{ i18n "depleted" }}</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- ===== vitals ===== -->
+    <article class="bo-tile bo-t-vit" aria-label='{{ i18n "pages.index.systemStatus" }}'>
+      <div class="bo-tile-head"><h3 class="bo-tile-title">{{ i18n "pages.index.systemStatus" }}</h3></div>
+      <div class="bo-vit-list">
+
+        <div class="bo-vit-item" v-for="v in vitals" :key="v.key">
+          <div class="bo-vit-row">
+            <div class="bo-ring-wrap">
+              <svg viewBox="0 0 40 40" aria-hidden="true">
+                <circle class="bo-ring-track" cx="20" cy="20" r="16"></circle>
+                <circle class="bo-ring-progress" :class="ringClass(v.percent)" cx="20" cy="20" r="16"
+                  :style="{ strokeDashoffset: ringOffset(v.percent) }"></circle>
+              </svg>
+              <span class="bo-ring-icon">
+                <svg class="bo-icon" aria-hidden="true"><use :href="'#bo-i-' + v.icon"></use></svg>
+              </span>
+            </div>
+            <div class="bo-vit-info">
+              <div class="bo-vit-top">
+                <span class="bo-vit-name">[[ v.label ]]</span>
+                <span class="bo-vit-pct num">[[ v.percent ]]%</span>
+              </div>
+              <p class="bo-vit-meta">[[ v.meta ]]</p>
+            </div>
+          </div>
+          <!-- The component's default paddings (32 left, 20 bottom) assume a
+               full-size chart with axes; at 24px tall they leave a negative
+               draw area, so they are zeroed out here.
+               `fit` because 20px of draw height cannot resolve a 0..100 axis:
+               against the fixed scale an idle machine drew a straight line. The
+               10-point floor keeps a genuinely flat series (disk, idle swap)
+               flat instead of magnifying its last decimal. -->
+          <div class="bo-vit-spark">
+            <sparkline :data="history[v.key]" :vb-width="240" :height="24"
+              :max-points="HISTORY_POINTS" :fill-opacity="0.14" :stroke="chartColors.accent"
+              :show-grid="false" :show-marker="false" :stroke-width="1.5"
+              :fit="!v.rate" :min-span="10" :autoscale="!!v.rate" :log-scale="!!v.rate"
+              :padding-left="0" :padding-right="0" :padding-top="2" :padding-bottom="2" />
+          </div>
+        </div>
+
+      </div>
+      <div class="bo-divider"></div>
+      <div class="bo-tile-head bo-tile-head--sub"><h3 class="bo-tile-title">{{ i18n "pages.index.connectionCount" }}</h3></div>
+      <div class="bo-conn-body">
+        <div class="bo-conn-stat bo-conn-stat--tcp">
+          <span class="bo-conn-label">
+            <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-link"></use></svg>TCP
+          </span>
+          <span class="bo-conn-value num">[[ status.tcpCount ]]</span>
+        </div>
+        <div class="bo-conn-stat bo-conn-stat--udp">
+          <span class="bo-conn-label">
+            <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-link"></use></svg>UDP
+          </span>
+          <span class="bo-conn-value num">[[ status.udpCount ]]</span>
+        </div>
+      </div>
+      <div class="bo-conn-ratio">
+        <span class="bo-conn-ratio-seg bo-conn-ratio-seg--tcp" :style="{ width: connRatio.tcp }"></span>
+        <span class="bo-conn-ratio-seg bo-conn-ratio-seg--udp" :style="{ width: connRatio.udp }"></span>
+      </div>
+
+      <div class="bo-divider"></div>
+      <div class="bo-tile-head">
+        <h3 class="bo-tile-title">{{ i18n "pages.index.ipAddresses" }}</h3>
+        <button type="button" class="bo-icon-btn bo-icon-btn--ghost" @click="showIp = !showIp"
+          :aria-label='`{{ i18n "pages.index.toggleIpVisibility" }}`' :aria-pressed="String(!showIp)">
+          <svg class="bo-icon bo-icon-16" aria-hidden="true">
+            <use :href="showIp ? '#bo-i-eye' : '#bo-i-eye-off'"></use>
+          </svg>
+        </button>
+      </div>
+      <div class="bo-ip-row">
+        <span class="bo-ip-label">IPv4</span>
+        <span class="bo-ip-value num">[[ showIp ? status.publicIP.ipv4 : maskIp(status.publicIP.ipv4) ]]</span>
+      </div>
+      <div class="bo-ip-row">
+        <span class="bo-ip-label">IPv6</span>
+        <span class="bo-ip-value num">[[ showIp ? status.publicIP.ipv6 : maskIp(status.publicIP.ipv6) ]]</span>
+      </div>
+    </article>
+
+    <!-- ===== VPN services =====
+         Core Settings only. The daemon states come from /panel/core/status,
+         which that permission gates, and every chip navigates to the Core page,
+         which it also gates. Rendered for anyone else the tile would be twelve
+         chips reading "unknown" that redirect on click. -->
+    {{ if .perms.accessCoreSettings }}
+    <article class="bo-tile bo-t-svc" aria-label='{{ i18n "pages.index.vpnServices" }}'>
+      <div class="bo-tile-head">
+        <h3 class="bo-tile-title">{{ i18n "pages.index.vpnServices" }}</h3>
+        <span class="bo-tile-meta">[[ vpnSummary ]]</span>
+      </div>
+      <div class="bo-svc-grid">
+        <button type="button" class="bo-svc-chip" v-for="c in vpnCoreStatuses()" :key="c.name"
+          :data-state="coreStateKey(c.state)"
+          :aria-label="coreLabel(c.name) + ': ' + coreStateText(c.state)"
+          @click="openCore(c.name)">
+          <span class="bo-svc-led"></span>
+          <span class="bo-svc-name">[[ coreLabel(c.name) ]]</span>
+          <span class="bo-svc-state">[[ coreStateText(c.state) ]]</span>
+        </button>
+      </div>
+    </article>
+    {{ end }}
+
+    <!-- ===== Xray ===== -->
+    <article class="bo-tile bo-t-xray" aria-label='{{ i18n "pages.index.xrayStatus" }}'>
+      <div class="bo-tile-head">
+        <h3 class="bo-tile-title">{{ i18n "pages.index.xrayStatus" }}</h3>
+        <a-popover v-if="status.xray.state == 'error'" :overlay-class-name="themeSwitcher.currentTheme">
+          <span slot="title">
+            <a-row type="flex" align="middle" justify="space-between">
+              <a-col><span>{{ i18n "pages.index.xrayErrorPopoverTitle" }}</span></a-col>
+              <a-col><a-icon type="bars" class="cursor-pointer float-right" @click="openLogs()"></a-icon></a-col>
+            </a-row>
+          </span>
+          <template slot="content">
+            <span class="max-w-400" v-for="line in (status.xray.errorMsg || '').split('\n')">[[ line ]]</span>
+          </template>
+          <span class="bo-status-pill bo-status-pill--error">
+            <span class="bo-dot bo-dot--error"></span>[[ status.xray.stateMsg ]]
+          </span>
+        </a-popover>
+        <span v-else class="bo-status-pill" :class="xrayPillClass" aria-live="polite">
+          <span class="bo-dot" :class="xrayDotClass"></span>[[ status.xray.stateMsg ]]
+        </span>
+      </div>
+      <div class="bo-kv-row">
+        <span class="bo-kv-label">{{ i18n "pages.index.xrayStatus" }}</span>
+        <span class="bo-kv-value num bo-kv-with-action">
+          [[ status.xray.version != 'Unknown' ? 'v' + status.xray.version : '-' ]]
+          <button type="button" class="bo-inline-btn" @click="openSelectV2rayVersion"
+            title='{{ i18n "pages.index.xraySwitch" }}' aria-label='{{ i18n "pages.index.xraySwitch" }}'>
+            <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-info"></use></svg>
+          </button>
+        </span>
+      </div>
+      <div class="bo-kv-row">
+        <span class="bo-kv-label">{{ i18n "pages.index.operationHours" }}</span>
+        <span class="bo-kv-value num">[[ TimeFormatter.formatUptime(status.appStats.uptime) ]]</span>
+      </div>
+      <div class="bo-divider"></div>
+      <div class="bo-btn-row">
+        <!-- Xray's own output, the same source Core Settings reads. This tile's log
+             button used to open the ACCESS log instead, which the shipped template
+             disables ("access": "none"), so the one button on the Xray tile answered
+             with an empty modal on every default install. -->
+        {{ if .perms.manageOverview }}
+        <button type="button" class="bo-icon-btn" @click="openCoreLogs('xray')">
+          <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-file"></use></svg>{{ i18n "pages.index.logs" }}
+        </button>
+        {{ end }}
+        <!-- The access log is a different thing: per-connection rows with Direct /
+             Blocked filters. Gated on whether that file is actually being written,
+             not on ipLimitEnable, which is now an unconditional true. -->
+        {{ if .perms.manageOverview }}
+        <button type="button" class="bo-icon-btn" v-if="xrayAccessLogEnable" @click="openXrayLogs()">
+          <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-file"></use></svg>{{ i18n "pages.xray.accessLog" }}
+        </button>
+        {{ end }}
+        <!-- Stopping Xray drops every client on the panel and the geofiles dialog
+             rewrites what routing resolves against, so both answer to the bit that
+             says this overview may act. Without it the tile still reports Xray's
+             state; it just cannot change it. The Xray permission is no longer ANDed
+             on top: that made the controls unreachable for a reseller, whose derived
+             mask never carries a settings bit. Note the same two Xray actions are
+             also offered on the Xray settings page under the Xray bit alone, so this
+             gate scopes THIS page, not the capability. -->
+        {{ if .perms.manageOverview }}
+        <button type="button" class="bo-icon-btn bo-icon-btn--danger" @click="stopXrayService">
+          <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-stop"></use></svg>{{ i18n "pages.index.stopXray" }}
+        </button>
+        <button type="button" class="bo-icon-btn" @click="restartXrayService">
+          <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-refresh"></use></svg>{{ i18n "pages.index.restartXray" }}
+        </button>
+        <button type="button" class="bo-icon-btn" @click="openGeofiles()">
+          <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-globe"></use></svg>{{ i18n "pages.index.geofiles" }}
+        </button>
+        {{ end }}
+      </div>
+    </article>
+
+    <!-- ===== manage ===== -->
+    <!-- Every button here is escalation-class: the logs name other admins'
+         inbounds, clients and IPs; config.json carries every inbound's secrets;
+         backup and restore are the whole database, users table and bcrypt hashes
+         included. It used to answer only to the super admin role for exactly that
+         reason.
+
+         The operator chose otherwise on 2026-07-31, with the consequence stated:
+         manageOverview now opens this tile, so whoever holds that bit can take the
+         panel. It is a deliberate delegation, not an oversight. The server agrees
+         (requireOverviewManage on each route), so this gate hides what the caller
+         cannot do rather than being the only thing stopping them. -->
+    {{ if .perms.manageOverview }}
+    <article class="bo-tile bo-t-manage" aria-label='{{ i18n "menu.link" }}'>
+      <div class="bo-tile-head"><h3 class="bo-tile-title">{{ i18n "menu.link" }}</h3></div>
+      <div class="bo-btn-row bo-btn-row--compact">
+        <button type="button" class="bo-icon-btn" @click="openAllLogs()">
+          <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-file"></use></svg>{{ i18n "pages.index.logs" }}
+        </button>
+        <button type="button" class="bo-icon-btn" @click="openConfig">
+          <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-sliders"></use></svg>{{ i18n "pages.index.config" }}
+        </button>
+        <button type="button" class="bo-icon-btn" @click="openBackup">
+          <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-download"></use></svg>{{ i18n "pages.index.backup" }}
+        </button>
+        <button type="button" class="bo-icon-btn" @click="openRestore">
+          <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-refresh"></use></svg>{{ i18n "pages.index.restore" }}
+        </button>
+      </div>
+    </article>
+    {{ end }}
+
+    <!-- ===== VPN-UI panel + updater ===== -->
+    <article class="bo-tile bo-t-vpnui" aria-label="VPN-UI">
+      <div class="bo-tile-head">
+        <h3 class="bo-tile-title">VPN-UI</h3>
+        <!-- The updater installs the upstream server release; where the platform
+             says it cannot apply (OpenWrt updates through its package) the whole
+             update surface is left out, see PanelPlatform.panelUpdate. -->
+        <button type="button" class="bo-icon-btn bo-icon-btn--accent" v-if="PanelPlatform.panelUpdate"
+          :disabled="panelUpdate.checking" @click="checkForUpdate(true)">
+          <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-refresh"></use></svg>
+          {{ i18n "pages.index.checkUpdate" }}
+        </button>
+      </div>
+      <div class="bo-vpnui-body">
+        <div>
+          <a rel="noopener" href="https://github.com/Sir-MmD/vpn-ui" target="_blank"
+            :style="{ color: 'inherit', textDecoration: 'none' }">
+            <div class="bo-vpnui-version num">v{{ .cur_ver }}</div>
+          </a>
+          <template v-if="PanelPlatform.panelUpdate">
+          <p v-if="panelUpdate.checked && !panelUpdate.available && !panelUpdate.checking"
+            class="bo-status-line bo-status-line--ok">
+            <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-check-circle"></use></svg>
+            {{ i18n "pages.index.upToDate" }}
+          </p>
+          <p v-else-if="panelUpdate.available" class="bo-status-line bo-status-line--warn">
+            <svg class="bo-icon bo-icon-16" aria-hidden="true"><use href="#bo-i-download"></use></svg>
+            {{ i18n "pages.index.updateAvailable" }} <span class="num">v[[ panelUpdate.latest ]]</span>
+          </p>
+          <a-tooltip v-if="panelUpdate.error" :title="panelUpdate.error">
+            <p class="bo-status-line" :style="{ color: 'var(--error)', cursor: 'help' }">
+              <a-icon type="warning"></a-icon>
+            </p>
+          </a-tooltip>
+
+          <div v-if="panelUpdate.updating" :style="{ marginTop: '12px' }">
+            <a-progress :percent="panelUpdate.percent"
+              :status="panelUpdate.phase === 'error' ? 'exception' : (panelUpdate.phase === 'restarting' ? 'success' : 'active')"
+              size="small"></a-progress>
+            <div :style="{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }">
+              <span :style="{ color: 'var(--info)', whiteSpace: 'nowrap', fontSize: '12.5px' }">
+                [[ panelUpdatePhaseText() ]]
+              </span>
+              <span v-if="panelUpdateSpeedText()" class="num"
+                :style="{ color: 'var(--text-3)', whiteSpace: 'nowrap', fontSize: '12.5px' }">
+                [[ panelUpdateSpeedText() ]]
+              </span>
+              <!-- Only the DOWNLOAD is abortable: once the binary swap starts
+                   there is nothing safe to undo, so the button retires itself
+                   rather than offering a cancel the server would refuse. -->
+              {{ if .perms.manageOverview }}
+              <button type="button" class="bo-icon-btn bo-icon-btn--danger bo-update-cancel"
+                v-if="panelUpdate.phase === 'downloading'"
+                :disabled="panelUpdate.cancelling" @click="cancelPanelUpdate">
+                <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-stop"></use></svg>
+                [[ panelUpdate.cancelling ? '{{ i18n "pages.index.updateCancelling" }}' : '{{ i18n "pages.index.updateCancel" }}' ]]
+              </button>
+              {{ end }}
+            </div>
+          </div>
+          </template>
+        </div>
+
+        <!-- The update is not armed from here any more: it opens the release
+             notes first, so the operator reads what is about to replace the
+             running binary before agreeing to it. -->
+        <div class="bo-btn-row">
+          {{ if .perms.manageOverview }}
+          <button type="button" class="bo-btn bo-btn--primary"
+            v-if="PanelPlatform.panelUpdate && panelUpdate.available && !panelUpdate.updating"
+            @click="openUpdateModal">{{ i18n "pages.index.updateNow" }}</button>
+          {{ end }}
+          <!-- Manual update: a binary the operator names themselves. Offered whether
+               or not the release check found anything, because its whole point is the
+               box that cannot reach GitHub, where the check is exactly what fails.
+               The two sources are kept behind one button so the tile leads with the
+               ordinary path, and picking it opens a dialog rather than swapping in two
+               more buttons: which END does the transfer is not guessable from the
+               labels, and the sentence that says so does not fit on a tile button.
+               The file input is hidden and driven by that dialog so the tile keeps
+               its own styling. -->
+          {{ if .perms.manageOverview }}
+          <button type="button" class="bo-btn bo-btn--ghost bo-btn--icon"
+            v-if="PanelPlatform.panelUpdate && !panelUpdate.updating" @click="manualModal.visible = true">
+            <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-download"></use></svg>
+            {{ i18n "pages.index.manualUpdate" }}
+          </button>
+          <input type="file" ref="panelBinaryInput" :style="{ display: 'none' }"
+            @change="onPanelBinaryPicked">
+          {{ end }}
+          <!-- Always offered, unlike Update Now: it is the one action on this
+               tile that does not depend on the release check having run. -->
+          <button type="button" class="bo-btn bo-btn--ghost bo-btn--icon"
+            @click="openDonateModal">
+            <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-heart"></use></svg>
+            {{ i18n "pages.index.donate" }}
+          </button>
+        </div>
+      </div>
+    </article>
+
+
+    <!-- ===== connections ===== -->
+
+  </div>
+</a-spin>
+  <!-- Panel update confirmation. The release notes are the whole point of the
+       dialog: replacing the running binary and restarting is not something to
+       agree to from a one-line popconfirm. -->
+  <a-modal id="panel-update-modal" v-model="updateModal.visible"
+    title='{{ i18n "pages.index.updateModalTitle" }}' :closable="true"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 560"
+    ok-text='{{ i18n "pages.index.updateNow" }}' cancel-text='{{ i18n "cancel" }}'
+    @ok="confirmPanelUpdate">
+    <div class="bo-relnotes-head">
+      <span class="bo-relnotes-ver num">v[[ panelUpdate.current ]]</span>
+      <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-swap"></use></svg>
+      <span class="bo-relnotes-ver bo-relnotes-ver--new num">v[[ panelUpdate.latest ]]</span>
+      <span class="bo-relnotes-date" v-if="releaseDateText">[[ releaseDateText ]]</span>
+      <a class="bo-relnotes-link" v-if="panelUpdate.url" :href="panelUpdate.url"
+        target="_blank" rel="noopener">
+        <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-link"></use></svg>
+      </a>
+    </div>
+    <div class="bo-relnotes-label">{{ i18n "pages.index.updateReleaseNotes" }}</div>
+    <div class="bo-relnotes" v-html="releaseNotesHtml"></div>
+    <p class="bo-relnotes-foot">
+      <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-info"></use></svg>
+      {{ i18n "pages.index.updateModalIntro" }}
+    </p>
+  </a-modal>
+
+  <!-- Manual-update source picker. Nothing here installs or even stages anything:
+       it only decides which end of the wire carries the binary, and the two are not
+       interchangeable on the box this feature exists for. "From URL" is the PANEL
+       downloading, which is exactly what a host that cannot reach GitHub cannot do,
+       and "from file" is the browser uploading, which is the way out of that. Each
+       choice carries that sentence because neither label says it, and picking wrong
+       costs a transfer that fails minutes later. Ungated like the two dialogs below
+       it: the gate is on the button in the tile that opens this. -->
+  <a-modal id="panel-manual-modal" v-model="manualModal.visible"
+    title='{{ i18n "pages.index.manualUpdate" }}' :closable="true"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 520"
+    cancel-text='{{ i18n "close" }}'
+    :ok-button-props="{ style: { display: 'none' } }"
+    @cancel="() => manualModal.visible = false">
+    <p :style="{ color: 'var(--text-3)' }">{{ i18n "pages.index.manualUpdateIntro" }}</p>
+    <div :style="{ display: 'flex', flexDirection: 'column', gap: '10px' }">
+      <button type="button" class="bo-icon-btn" @click="chooseManualUpdate('url')"
+        :style="{ width: '100%', alignItems: 'flex-start', textAlign: 'left', padding: '12px 14px', gap: '10px' }">
+        <svg class="bo-icon bo-icon-16" aria-hidden="true" :style="{ flex: 'none', marginTop: '2px' }">
+          <use href="#bo-i-link"></use>
+        </svg>
+        <span>
+          <span :style="{ display: 'block' }">{{ i18n "pages.index.updateFromUrl" }}</span>
+          <span :style="{ display: 'block', marginTop: '3px', fontWeight: 'normal', color: 'var(--text-3)', whiteSpace: 'normal' }">
+            {{ i18n "pages.index.updateFromUrlDesc" }}
+          </span>
+        </span>
+      </button>
+      <button type="button" class="bo-icon-btn" @click="chooseManualUpdate('file')"
+        :style="{ width: '100%', alignItems: 'flex-start', textAlign: 'left', padding: '12px 14px', gap: '10px' }">
+        <svg class="bo-icon bo-icon-16" aria-hidden="true" :style="{ flex: 'none', marginTop: '2px' }">
+          <use href="#bo-i-file"></use>
+        </svg>
+        <span>
+          <span :style="{ display: 'block' }">{{ i18n "pages.index.updateFromFile" }}</span>
+          <span :style="{ display: 'block', marginTop: '3px', fontWeight: 'normal', color: 'var(--text-3)', whiteSpace: 'normal' }">
+            {{ i18n "pages.index.updateFromFileDesc" }}
+          </span>
+        </span>
+      </button>
+    </div>
+  </a-modal>
+
+  <!-- Update-from-URL address prompt. The panel does this download, not the browser,
+       so what is typed here has to be reachable from the SERVER: that is the whole
+       point on a box whose operator can reach GitHub but whose host cannot. Nothing
+       is staged until it answers, and the confirmation below is still what installs,
+       because an address says nothing about what is at the end of it. -->
+  <a-modal id="panel-url-modal" v-model="urlModal.visible"
+    title='{{ i18n "pages.index.updateFromUrl" }}' :closable="!urlModal.fetching"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 520"
+    ok-text='{{ i18n "pages.index.updateFetch" }}' cancel-text='{{ i18n "cancel" }}'
+    :mask-closable="!urlModal.fetching"
+    :ok-button-props="{ props: { disabled: !urlModal.url.trim(), loading: urlModal.fetching } }"
+    :cancel-button-props="{ props: { disabled: urlModal.fetching } }"
+    @ok="fetchPanelBinaryFromUrl">
+    <p :style="{ color: 'var(--text-3)' }">{{ i18n "pages.index.updateFromUrlIntro" }}</p>
+    <a-input v-model="urlModal.url" :disabled="urlModal.fetching"
+      placeholder="https://example.com/vpn-ui-amd64"
+      @pressEnter="urlModal.url.trim() && !urlModal.fetching && fetchPanelBinaryFromUrl()"></a-input>
+  </a-modal>
+
+  <!-- Manual-update confirmation, shared by both sources. Opens only after the server
+       has read the binary it now holds, so both versions here came out of the file
+       rather than off its name or its address. A DOWNGRADE has to be typed out before
+       OK arms, and then confirmed once more: two deliberate acts, not the same click
+       twice. -->
+  <a-modal id="panel-upload-modal" v-model="uploadModal.visible"
+    :title='uploadModal.source === "url"
+      ? "{{ i18n "pages.index.updateFromUrl" }}"
+      : "{{ i18n "pages.index.updateFromFile" }}"' :closable="true"
+    :class="themeSwitcher.currentTheme"
+    :ok-text='uploadModal.info.direction === "downgrade"
+      ? "{{ i18n "pages.index.updateDowngradeNow" }}"
+      : "{{ i18n "pages.index.updateNow" }}"'
+    cancel-text='{{ i18n "cancel" }}'
+    :ok-button-props="{ props: { disabled: !uploadOkArmed, type: uploadModal.info.direction === 'downgrade' ? 'danger' : 'primary' } }"
+    @cancel="cancelPanelUpload" @ok="confirmPanelUpload">
+    <div class="bo-relnotes-head">
+      <span class="bo-relnotes-ver num">v[[ uploadModal.info.current ]]</span>
+      <svg class="bo-icon bo-icon-14" aria-hidden="true"><use href="#bo-i-swap"></use></svg>
+      <span class="bo-relnotes-ver bo-relnotes-ver--new num">v[[ uploadModal.info.new ]]</span>
+    </div>
+    <a-alert v-if="uploadModal.info.direction === 'downgrade'" type="warning" show-icon
+      :style="{ marginTop: '12px' }"
+      message='{{ i18n "pages.index.updateDowngradeTitle" }}'
+      description='{{ i18n "pages.index.updateDowngradeBody" }}'></a-alert>
+    <a-alert v-else-if="uploadModal.info.direction === 'same'" type="info" show-icon
+      :style="{ marginTop: '12px' }"
+      message='{{ i18n "pages.index.updateSameVersion" }}'></a-alert>
+    <a-alert v-else-if="uploadModal.info.direction === 'unknown'" type="warning" show-icon
+      :style="{ marginTop: '12px' }"
+      message='{{ i18n "pages.index.updateUnknownVersion" }}'></a-alert>
+    <p v-else :style="{ marginTop: '12px' }">{{ i18n "pages.index.updateModalIntro" }}</p>
+    <!-- Typing the version is the first of the two confirmations, and the reason the
+         second one is not just the same click again. -->
+    <div v-if="uploadModal.info.direction === 'downgrade'" :style="{ marginTop: '12px' }">
+      <div :style="{ marginBottom: '4px', color: 'var(--text-3)' }">
+        {{ i18n "pages.index.updateDowngradeConfirmLabel" }} <span class="num">v[[ uploadModal.info.new ]]</span>
+      </div>
+      <a-input v-model.trim="uploadModal.typed" :placeholder="uploadModal.info.new"></a-input>
+    </div>
+  </a-modal>
+
+  <!-- Post-update confirmation. Shown once, on the first overview load after the
+       panel restarted into a new binary: the update flow reloads this page while
+       the old process is still going down, so without it the operator is left
+       looking at a dashboard with no evidence the swap actually took. The server
+       decides when this opens (it consumes a one-shot record), never the client. -->
+  <a-modal id="panel-updated-modal" v-model="updatedModal.visible"
+    title='{{ i18n "pages.index.updateDoneTitle" }}' :closable="true"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 420"
+    ok-text='{{ i18n "confirm" }}' :cancel-button-props="{ style: { display: 'none' } }"
+    @ok="() => updatedModal.visible = false">
+    <div class="bo-relnotes-head">
+      <span class="bo-relnotes-ver bo-relnotes-ver--new num">v[[ updatedModal.to ]]</span>
+    </div>
+    <p>{{ i18n "pages.index.updateDoneBody" }} <span class="num">v[[ updatedModal.to ]]</span>.</p>
+    <!-- Hidden on a reinstall of the same version, where it would read
+         "Updated from v1.8.3" next to "now running v1.8.3". -->
+    <p class="bo-relnotes-foot" v-if="updatedModal.from && updatedModal.from !== updatedModal.to">
+      {{ i18n "pages.index.updateDoneFrom" }} <span class="num">v[[ updatedModal.from ]]</span>
+    </p>
+    <!-- Where the database the old binary was running on ended up. Behind a v-if
+         because the snapshot is best-effort and does not block the update: a line
+         naming no file would read as a promise the panel did not keep. -->
+    <div class="bo-update-backup" v-if="updatedModal.backup">
+      <div>{{ i18n "pages.index.updateDoneBackup" }} <span class="num">v[[ updatedModal.from ]]</span></div>
+      <div class="bo-update-backup-path">[[ updatedModal.backup ]]</div>
+    </div>
+  </a-modal>
+
+  <!-- Donate dialog (VPN-UI tile). The addresses are rendered server-side from
+       web/controller/donate.go, which a test pins to README.md's Donate section
+       so the panel can never show an address the README has moved on from.
+       Each row is a copy target: these are pasted into a wallet, so the address
+       is monospaced, selectable, and copied verbatim rather than retyped. -->
+  <a-modal id="donate-modal" v-model="donateModal.visible" title='{{ i18n "pages.index.donateTitle" }}'
+    :closable="true" :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 620"
+    @cancel="() => donateModal.visible = false" footer="">
+    <p class="bo-donate-intro">{{ i18n "pages.index.donateIntro" }}</p>
+    <ul class="bo-donate-list">
+      <li class="bo-donate-row" v-for="(d, i) in donateList" :key="d.chain">
+        <div class="bo-donate-chain">[[ d.chain ]]</div>
+        <code class="bo-donate-addr num">[[ d.addr ]]</code>
+        <button type="button" class="bo-icon-btn bo-donate-copy"
+          :class="donateModal.copied === i ? 'bo-icon-btn--ok' : ''"
+          @click="copyDonateAddress(i, d.addr)">
+          <!-- v-if/v-else rather than a bound :href: html/template treats an href
+               as a URL context and would rewrite a Vue expression to ZgotmplZ. -->
+          <svg class="bo-icon bo-icon-14" aria-hidden="true">
+            <use v-if="donateModal.copied === i" href="#bo-i-check-circle"></use>
+            <use v-else href="#bo-i-copy"></use>
+          </svg>
+          [[ donateModal.copied === i ? '{{ i18n "copied" }}' : '{{ i18n "copy" }}' ]]
+        </button>
+      </li>
+    </ul>
+  </a-modal>
+
+  <a-modal id="version-modal" v-model="versionModal.visible" title='{{ i18n "pages.index.xraySwitch" }}'
+    :closable="true" @ok="() => versionModal.visible = false" :class="themeSwitcher.currentTheme" footer="">
+    <a-collapse default-active-key="1">
+      <a-collapse-panel key="1" header='Xray'>
+        <a-alert type="warning" class="mb-12 w-100" message='{{ i18n "pages.index.xraySwitchClickDesk" }}'
+          show-icon></a-alert>
+        <a-list class="ant-version-list w-100" bordered>
+          <a-list-item class="ant-version-list-item" v-for="version, index in versionModal.versions">
+            <a-tag :color="index % 2 == 0 ? 'purple' : 'green'">[[ version ]]</a-tag>
+            <a-radio :class="themeSwitcher.currentTheme" :checked="version === `v${status.xray.version}`"
+              @click="switchV2rayVersion(version)"></a-radio>
+          </a-list-item>
+        </a-list>
+      </a-collapse-panel>
+      <a-collapse-panel key="2" header='Geofiles'>
+        <a-alert type="info" show-icon class="mb-10"
+          message='{{ i18n "pages.index.geofileBundledHint" }}'></a-alert>
+        <a-list class="ant-version-list w-100" bordered>
+          <a-list-item class="ant-version-list-item"
+            v-for="file in ['geosite.dat', 'geoip.dat', 'geosite_IR.dat', 'geoip_IR.dat', 'geosite_RU.dat', 'geoip_RU.dat']">
+            <a-tag color="green">[[ file ]]</a-tag>
+            <a-badge v-if="geofileStatusByName[file]"
+              :status="geofileStatusByName[file].installed ? 'success' : 'default'"
+              :text="geofileStateText(file)"></a-badge>
+            <a-icon type="reload" @click="updateGeofile(file)" class="mr-8" />
+          </a-list-item>
+        </a-list>
+        <div class="mt-5 d-flex justify-end"><a-button @click="updateGeofile('')">{{ i18n
+            "pages.index.geofilesUpdateAll" }}</a-button></div>
+      </a-collapse-panel>
+      <a-collapse-panel key="3" header='{{ i18n "pages.index.customGeoTitle" }}'>
+        <div class="custom-geo-section">
+        <a-alert type="info" show-icon class="mb-10"
+          message='{{ i18n "pages.index.customGeoRoutingHint" }}'></a-alert>
+        <div class="mb-10">
+          <a-button type="primary" icon="plus" @click="openCustomGeoModal(null)" :loading="customGeoLoading">
+            {{ i18n "pages.index.customGeoAdd" }}
+          </a-button>
+          <a-button class="ml-8" icon="reload" @click="updateAllCustomGeo" :loading="customGeoUpdatingAll">{{ i18n
+            "pages.index.geofilesUpdateAll" }}</a-button>
+        </div>
+        <a-table :columns="customGeoColumns" :data-source="customGeoList" :pagination="false" :row-key="r => r.id"
+          :loading="customGeoLoading" size="small" :scroll="{ x: 520 }">
+          <template slot="extDat" slot-scope="text, record">
+            <code class="custom-geo-ext-code">[[ customGeoExtDisplay(record) ]]</code>
+          </template>
+          <template slot="lastUpdatedAt" slot-scope="text, record">
+            <span v-if="record.lastUpdatedAt">[[ customGeoFormatTime(record.lastUpdatedAt) ]]</span>
+            <span v-else>-</span>
+          </template>
+          <template slot="action" slot-scope="text, record">
+            <a-space size="small">
+              <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="title">{{ i18n "pages.index.customGeoEdit" }}</template>
+                <a-button type="link" size="small" icon="edit" @click="openCustomGeoModal(record)"></a-button>
+              </a-tooltip>
+              <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="title">{{ i18n "pages.index.customGeoDownload" }}</template>
+                <a-button type="link" size="small" icon="reload" @click="downloadCustomGeo(record.id)" :loading="customGeoActionId === record.id"></a-button>
+              </a-tooltip>
+              <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="title">{{ i18n "pages.index.customGeoDelete" }}</template>
+                <a-button type="link" size="small" icon="delete" @click="confirmDeleteCustomGeo(record)"></a-button>
+              </a-tooltip>
+            </a-space>
+          </template>
+        </a-table>
+        </div>
+      </a-collapse-panel>
+    </a-collapse>
+  </a-modal>
+  <a-modal id="geofiles-modal" v-model="geofilesModal.visible" title='{{ i18n "pages.index.geofiles" }}'
+    :closable="true" @ok="() => geofilesModal.visible = false" :class="themeSwitcher.currentTheme" footer="">
+    <a-collapse default-active-key="2">
+      <a-collapse-panel key="2" header='Geofiles'>
+        <a-alert type="info" show-icon class="mb-10"
+          message='{{ i18n "pages.index.geofileBundledHint" }}'></a-alert>
+        <!-- Auto-update. On by default, because these files go stale SILENTLY: a
+             routing rule naming a geosite category keeps parsing and the core keeps
+             starting, the categories are just months out of date and the rule
+             quietly stops matching what the operator thinks it matches. -->
+        <div class="mb-10"
+          :style="{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }">
+          <!-- The reason lives in the "?" rather than under the label: it explains a
+               failure mode nobody is looking for, which is worth a sentence when you
+               go looking and worth no vertical space when you do not. -->
+          <span>
+            {{ i18n "pages.index.geofileAutoUpdate" }}
+            <a-tooltip :title="geofileText.autoUpdateDesc">
+              <a-icon type="question-circle" :style="{ marginInlineStart: '4px', opacity: 0.65 }"></a-icon>
+            </a-tooltip>
+          </span>
+          <a-switch :checked="geofileAutoUpdate" :loading="geofileAutoUpdateSaving"
+            @change="toggleGeofileAutoUpdate"></a-switch>
+        </div>
+        <a-list class="ant-version-list w-100" bordered>
+          <a-list-item class="ant-version-list-item"
+            v-for="file in ['geosite.dat', 'geoip.dat', 'geosite_IR.dat', 'geoip_IR.dat', 'geosite_RU.dat', 'geoip_RU.dat']">
+            <a-tag color="green">[[ file ]]</a-tag>
+            <a-badge v-if="geofileStatusByName[file]"
+              :status="geofileStatusByName[file].installed ? 'success' : 'default'"
+              :text="geofileStateText(file)"></a-badge>
+            <a-icon type="reload" @click="updateGeofile(file)" class="mr-8" />
+          </a-list-item>
+        </a-list>
+        <!-- Reads the SERVER's job state, not a local boolean, so it is still here
+             after the operator left the overview and came back mid-download. -->
+        <div v-if="geofileRun.running || geofileRun.done" class="mt-5">
+          <a-progress :percent="geofileRunPercent()" size="small"
+            :status="geofileRun.running ? 'active' : (geofileRun.failed ? 'exception' : 'success')"></a-progress>
+          <div :style="{ fontSize: '12px', opacity: 0.65 }">[[ geofileRunText() ]]</div>
+        </div>
+        <div class="mt-5 d-flex justify-end"><a-button @click="updateGeofile('')"
+            :loading="geofileRun.running">{{ i18n "pages.index.geofilesUpdateAll" }}</a-button></div>
+      </a-collapse-panel>
+      <a-collapse-panel key="3" header='{{ i18n "pages.index.customGeoTitle" }}'>
+        <div class="custom-geo-section">
+        <a-alert type="info" show-icon class="mb-10"
+          message='{{ i18n "pages.index.customGeoRoutingHint" }}'></a-alert>
+        <div class="mb-10">
+          <a-button type="primary" icon="plus" @click="openCustomGeoModal(null)" :loading="customGeoLoading">
+            {{ i18n "pages.index.customGeoAdd" }}
+          </a-button>
+          <a-button class="ml-8" icon="reload" @click="updateAllCustomGeo" :loading="customGeoUpdatingAll">{{ i18n
+            "pages.index.geofilesUpdateAll" }}</a-button>
+        </div>
+        <a-table :columns="customGeoColumns" :data-source="customGeoList" :pagination="false" :row-key="r => r.id"
+          :loading="customGeoLoading" size="small" :scroll="{ x: 520 }">
+          <template slot="extDat" slot-scope="text, record">
+            <code class="custom-geo-ext-code">[[ customGeoExtDisplay(record) ]]</code>
+          </template>
+          <template slot="lastUpdatedAt" slot-scope="text, record">
+            <span v-if="record.lastUpdatedAt">[[ customGeoFormatTime(record.lastUpdatedAt) ]]</span>
+            <span v-else>-</span>
+          </template>
+          <template slot="action" slot-scope="text, record">
+            <a-space size="small">
+              <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="title">{{ i18n "pages.index.customGeoEdit" }}</template>
+                <a-button type="link" size="small" icon="edit" @click="openCustomGeoModal(record)"></a-button>
+              </a-tooltip>
+              <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="title">{{ i18n "pages.index.customGeoDownload" }}</template>
+                <a-button type="link" size="small" icon="reload" @click="downloadCustomGeo(record.id)" :loading="customGeoActionId === record.id"></a-button>
+              </a-tooltip>
+              <a-tooltip :overlay-class-name="themeSwitcher.currentTheme">
+                <template slot="title">{{ i18n "pages.index.customGeoDelete" }}</template>
+                <a-button type="link" size="small" icon="delete" @click="confirmDeleteCustomGeo(record)"></a-button>
+              </a-tooltip>
+            </a-space>
+          </template>
+        </a-table>
+        </div>
+      </a-collapse-panel>
+    </a-collapse>
+  </a-modal>
+  <a-modal v-model="customGeoModal.visible" :title="customGeoModal.editId ? '{{ i18n "pages.index.customGeoModalEdit" }}' : '{{ i18n "pages.index.customGeoModalAdd" }}'"
+    :confirm-loading="customGeoModal.saving" @ok="submitCustomGeo" :ok-text="'{{ i18n "pages.index.customGeoModalSave" }}'" :cancel-text="'{{ i18n "close" }}'"
+    :class="themeSwitcher.currentTheme">
+    <a-form layout="vertical">
+      <a-form-item label='{{ i18n "pages.index.customGeoType" }}'>
+        <a-select v-model="customGeoModal.form.type" :disabled="!!customGeoModal.editId" :dropdown-class-name="themeSwitcher.currentTheme">
+          <a-select-option value="geosite">geosite</a-select-option>
+          <a-select-option value="geoip">geoip</a-select-option>
+        </a-select>
+      </a-form-item>
+      <a-form-item label='{{ i18n "pages.index.customGeoAlias" }}'>
+        <a-input v-model.trim="customGeoModal.form.alias" :disabled="!!customGeoModal.editId" placeholder='{{ i18n "pages.index.customGeoAliasPlaceholder" }}'></a-input>
+      </a-form-item>
+      <a-form-item label='{{ i18n "pages.index.customGeoUrl" }}'>
+        <a-input v-model.trim="customGeoModal.form.url" placeholder="https://"></a-input>
+      </a-form-item>
+    </a-form>
+  </a-modal>
+  <a-modal id="log-modal" v-model="logModal.visible" :closable="true" @cancel="() => logModal.visible = false"
+    :class="themeSwitcher.currentTheme" width="800px" footer="">
+    <template slot="title">
+      {{ i18n "pages.index.logs" }}
+      <a-icon :spin="logModal.loading" type="sync" class="va-middle ml-10" :disabled="logModal.loading"
+        @click="reloadLogs()">
+      </a-icon>
+    </template>
+    <a-form layout="inline">
+      <a-form-item class="mr-05">
+        <a-input-group compact>
+          <a-select size="small" v-model="logModal.rows" :style="{ width: '70px' }" @change="reloadLogs()"
+            :dropdown-class-name="themeSwitcher.currentTheme">
+            <a-select-option value="10">10</a-select-option>
+            <a-select-option value="20">20</a-select-option>
+            <a-select-option value="50">50</a-select-option>
+            <a-select-option value="100">100</a-select-option>
+            <a-select-option value="500">500</a-select-option>
+          </a-select>
+          <a-select size="small" v-model="logModal.level" :style="{ width: '95px' }" @change="reloadLogs()"
+            :dropdown-class-name="themeSwitcher.currentTheme">
+            <a-select-option value="debug">Debug</a-select-option>
+            <a-select-option value="info">Info</a-select-option>
+            <a-select-option value="notice">Notice</a-select-option>
+            <a-select-option value="warning">Warning</a-select-option>
+            <a-select-option value="err">Error</a-select-option>
+          </a-select>
+        </a-input-group>
+      </a-form-item>
+      <a-form-item>
+        <a-checkbox v-model="logModal.syslog" @change="reloadLogs()">SysLog</a-checkbox>
+      </a-form-item>
+      <a-form-item>
+        <a-button size="small" :type="logModal.live ? 'primary' : 'default'"
+          :class="{ 'log-live-on': logModal.live }" @click="logModal.setLive(!logModal.live)">
+          <span class="log-live-dot" v-if="logModal.live"></span>{{ i18n "pages.index.liveLog" }}
+        </a-button>
+      </a-form-item>
+
+      <a-form-item style="float: right;">
+        <a-button type="primary" icon="download" @click="FileManager.downloadTextFile(logModal.plain, 'vpn-ui.log')"></a-button>
+      </a-form-item>
+    </a-form>
+    <!-- Core filter. Client-side over the already-fetched lines, so ticking a
+         box is instant and costs no request. Only shown for the aggregated
+         (Manage tile) view, where there is more than one source to choose. -->
+    <div class="log-filter" v-if="logModal.mode === 'all' && logModal.sources.length > 1">
+      <span class="log-filter-label">{{ i18n "pages.index.logCores" }}</span>
+      <a-checkbox v-for="s in logModal.sources" :key="s"
+        :checked="logModal.enabled[s] !== false"
+        @change="e => { logModal.enabled = Object.assign({}, logModal.enabled, { [s]: e.target.checked }); logModal.apply(); }">
+        [[ s ]]
+      </a-checkbox>
+      <a-button size="small" type="link" @click="logModal.setAllSources(true)">{{ i18n "pages.core.checkAll" }}</a-button>
+      <a-button size="small" type="link" @click="logModal.setAllSources(false)">{{ i18n "pages.core.uncheckAll" }}</a-button>
+    </div>
+    <div class="ant-input log-container" v-html="logModal.formattedLogs"></div>
+  </a-modal>
+  <a-modal id="xraylog-modal" v-model="xraylogModal.visible" :closable="true"
+    @cancel="() => xraylogModal.visible = false" :class="themeSwitcher.currentTheme" width="80vw" footer="">
+    <template slot="title">
+      {{ i18n "pages.index.logs" }}
+      <a-icon :spin="xraylogModal.loading" type="sync" class="va-middle ml-10" :disabled="xraylogModal.loading"
+        @click="openXrayLogs()">
+      </a-icon>
+    </template>
+    <a-form layout="inline">
+      <a-form-item class="mr-05">
+        <a-input-group compact>
+          <a-select size="small" v-model="xraylogModal.rows" :style="{ width: '70px' }" @change="openXrayLogs()"
+            :dropdown-class-name="themeSwitcher.currentTheme">
+            <a-select-option value="10">10</a-select-option>
+            <a-select-option value="20">20</a-select-option>
+            <a-select-option value="50">50</a-select-option>
+            <a-select-option value="100">100</a-select-option>
+            <a-select-option value="500">500</a-select-option>
+          </a-select>
+        </a-input-group>
+      </a-form-item>
+      <a-form-item label="Filter:">
+        <a-input size="small" v-model="xraylogModal.filter" @keyup.enter="openXrayLogs()"></a-input>
+      </a-form-item>
+      <a-form-item>
+        <a-checkbox v-model="xraylogModal.showDirect" @change="openXrayLogs()">Direct</a-checkbox>
+        <a-checkbox v-model="xraylogModal.showBlocked" @change="openXrayLogs()">Blocked</a-checkbox>
+        <a-checkbox v-model="xraylogModal.showProxy" @change="openXrayLogs()">Proxy</a-checkbox>
+      </a-form-item>
+      <a-form-item>
+        <a-button size="small" :type="xraylogModal.live ? 'primary' : 'default'"
+          :class="{ 'log-live-on': xraylogModal.live }" @click="xraylogModal.setLive(!xraylogModal.live)">
+          <span class="log-live-dot" v-if="xraylogModal.live"></span>{{ i18n "pages.index.liveLog" }}
+        </a-button>
+      </a-form-item>
+      <a-form-item style="float: right;">
+        <a-button type="primary" icon="download" @click="downloadXrayLogs"></a-button>
+      </a-form-item>
+    </a-form>
+    <div class="ant-input log-container" v-html="xraylogModal.formattedLogs"></div>
+  </a-modal>
+  <a-modal id="backup-modal" v-model="backupModal.visible" title='{{ i18n "pages.index.backupTitle" }}' :closable="true"
+    footer="" :class="themeSwitcher.currentTheme">
+    <a-list class="ant-backup-list w-100" bordered>
+      <a-list-item class="ant-backup-list-item">
+        <a-list-item-meta>
+          <template #title>{{ i18n "pages.index.exportDatabase" }}</template>
+          <template #description>{{ i18n "pages.index.exportDatabaseDesc" }}</template>
+        </a-list-item-meta>
+        <a-button @click="openBackupName()" type="primary" icon="download" />
+      </a-list-item>
+      <a-list-item class="ant-backup-list-item">
+        <a-list-item-meta>
+          <template #title>{{ i18n "pages.index.importDatabase" }}</template>
+          <template #description>{{ i18n "pages.index.importDatabaseDesc" }}</template>
+        </a-list-item-meta>
+        <a-button @click="importDatabase()" type="primary" icon="upload" />
+      </a-list-item>
+      <a-list-item class="ant-backup-list-item">
+        <a-list-item-meta>
+          <template #title>{{ i18n "pages.index.importForeignTitle" }}</template>
+          <template #description>{{ i18n "pages.index.importForeignDesc" }}</template>
+        </a-list-item-meta>
+        <a-button @click="importForeignDatabase()" type="primary" icon="import" />
+      </a-list-item>
+    </a-list>
+  </a-modal>
+  <!-- Names the .db before it is downloaded. A dialog rather than a rename
+       afterwards because the download is a plain navigation (see exportDatabase),
+       so Content-Disposition is the only thing that can name the file and the
+       ticks have to reach the server as query params.
+
+       The preview is the point of the dialog, not decoration: unticking every box
+       is a legitimate choice and it produces a bare vpn-ui.db, which reads as a
+       bug unless the resulting name is on screen while you tick. -->
+  <a-modal id="backup-name-modal" v-model="backupNameModal.visible"
+    title='{{ i18n "pages.index.backupNameTitle" }}' :closable="true"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 440"
+    ok-text='{{ i18n "confirm" }}' cancel-text='{{ i18n "cancel" }}'
+    @ok="exportDatabase()" @cancel="() => backupNameModal.hide()">
+    <p class="bo-backup-name-desc">{{ i18n "pages.index.backupNameDesc" }}</p>
+    <a-checkbox-group v-model="backupNameModal.parts" :style="{ width: '100%' }">
+      <div class="bo-cf-ib" :class="{ on: backupNameModal.parts.includes('panelName') }">
+        <a-checkbox value="panelName">{{ i18n "pages.index.backupNamePanel" }}</a-checkbox>
+      </div>
+      <div class="bo-cf-ib" :class="{ on: backupNameModal.parts.includes('domain') }">
+        <a-checkbox value="domain">{{ i18n "pages.index.backupNameDomain" }}</a-checkbox>
+      </div>
+      <div class="bo-cf-ib" :class="{ on: backupNameModal.parts.includes('date') }">
+        <a-checkbox value="date">{{ i18n "pages.index.backupNameDate" }}</a-checkbox>
+      </div>
+      <div class="bo-cf-ib" :class="{ on: backupNameModal.parts.includes('time') }">
+        <a-checkbox value="time">{{ i18n "pages.index.backupNameTime" }}</a-checkbox>
+      </div>
+    </a-checkbox-group>
+    <div class="bo-backup-name-preview">
+      <span class="bo-backup-name-label">{{ i18n "pages.index.backupNamePreview" }}</span>
+      <span class="bo-backup-name-file">[[ backupFilename ]]</span>
+    </div>
+  </a-modal>
+  <!-- CPU History Modal -->
+  <a-modal id="cpu-history-modal" v-model="cpuHistoryModal.visible" :closable="true"
+    @cancel="() => cpuHistoryModal.visible = false" :class="themeSwitcher.currentTheme" width="900px" footer="">
+    <template slot="title">
+      CPU History
+      <a-select size="small" v-model="cpuHistoryModal.bucket" class="ml-10" style="width: 80px"
+        @change="fetchCpuHistoryBucket">
+        <a-select-option :value="2">2m</a-select-option>
+        <a-select-option :value="30">30m</a-select-option>
+        <a-select-option :value="60">1h</a-select-option>
+        <a-select-option :value="120">2h</a-select-option>
+        <a-select-option :value="180">3h</a-select-option>
+        <a-select-option :value="300">5h</a-select-option>
+      </a-select>
+    </template>
+    <div style="padding:16px">
+      <sparkline :data="cpuHistoryLong" :labels="cpuHistoryLabels" :vb-width="840" :height="220"
+        :stroke="status.cpu.color" :stroke-width="2.2" :show-grid="true" :show-axes="true" :tick-count-x="5"
+        :max-points="cpuHistoryLong.length" :fill-opacity="0.18" :marker-radius="3.2" :show-tooltip="true" />
+      <div style="margin-top:4px;font-size:11px;opacity:0.65">Timeframe: [[ cpuHistoryModal.bucket ]] sec per point (total [[ cpuHistoryLong.length ]] points)</div>
+    </div>
+  </a-modal>
+  <!-- Unsupported-distro warning -->
+  <a-modal id="distro-warn-modal" v-model="distroModal.visible" :closable="false"
+    :mask-closable="false" :class="themeSwitcher.currentTheme" width="520px">
+    <template slot="title">
+      <span style="color:#cf1322;font-weight:600">⚠&nbsp; Unsupported distribution</span>
+    </template>
+    <div style="padding:4px 2px">
+      <p style="margin-bottom:10px">
+        <b>[[ distroModal.pretty ]]</b> is not on vpn-ui's officially tested distro list.
+        The panel may still run, but <b style="color:#cf1322">expect errors</b>.
+      </p>
+      <p style="margin-bottom:0;opacity:0.7;font-size:12px;line-height:1.5">
+        Officially tested: [[ distroModal.tested ]]
+      </p>
+    </div>
+    <template slot="footer">
+      <a-button @click="dismissDistroWarning(false)">Close</a-button>
+      <a-button type="primary" @click="dismissDistroWarning(true)">Close and don't show again</a-button>
+    </template>
+  </a-modal>
+{{template "page/shell_end" . }}
+{{template "page/body_scripts" .}}
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "component/aCustomStatistic" .}}
+{{template "modals/textModal"}}
+{{/* Needed by openRenameServer(); defines the global `promptModal`. */}}
+{{template "modals/promptModal"}}
+<script>
+  // [needle, mark] pairs tested in order against a lowercased os-release
+  // NAME. Order is load-bearing: every derivative must precede the name it
+  // contains, so the *buntu flavours come before "ubuntu" and the Arch
+  // derivatives before "arch". A mark here must have a matching
+  // web/assets/img/distro/<mark>.svg and a .bo-distro--<mark> rule in
+  // components.css; see the header of that file's distro section.
+  const DISTRO_MARKS = [
+    ['ubuntu mate', 'ubuntu-mate'], ['ubuntu-mate', 'ubuntu-mate'],
+    ['kubuntu', 'kubuntu'], ['xubuntu', 'xubuntu'], ['lubuntu', 'lubuntu'],
+    ['pop!_os', 'pop'], ['pop_os', 'pop'], ['pop os', 'pop'],
+    ['linux mint', 'linuxmint'], ['linuxmint', 'linuxmint'], ['lmde', 'linuxmint'],
+    ['elementary', 'elementary'], ['zorin', 'zorin'],
+    ['raspbian', 'raspbian'], ['raspberry', 'raspbian'],
+    ['kde neon', 'neon'], ['neon', 'neon'],
+    ['ubuntu', 'ubuntu'],
+    ['devuan', 'devuan'], ['deepin', 'deepin'], ['kali', 'kali'],
+    ['parrot', 'parrot'], ['proxmox', 'proxmox'], ['debian', 'debian'],
+    ['almalinux', 'almalinux'], ['alma', 'almalinux'],
+    ['rocky', 'rocky'], ['centos', 'centos'],
+    ['nobara', 'nobara'], ['fedora', 'fedora'],
+    ['red hat', 'rhel'], ['redhat', 'rhel'], ['rhel', 'rhel'],
+    ['opensuse', 'opensuse'], ['suse', 'sles'], ['sles', 'sles'],
+    ['alpine', 'alpine'], ['manjaro', 'manjaro'],
+    ['endeavour', 'endeavouros'], ['garuda', 'garuda'], ['artix', 'artix'],
+    ['cachy', 'cachyos'], ['omarchy', 'omarchy'], ['asahi', 'asahi'],
+    ['arch', 'arch'],
+    ['gentoo', 'gentoo'], ['nixos', 'nixos'], ['void', 'void'],
+    ['slackware', 'slackware'], ['solus', 'solus'],
+    ['mx linux', 'mx'], ['mx-', 'mx'],
+    ['qubes', 'qubes'], ['tails', 'tails'], ['photon', 'photon'],
+    ['openwrt', 'openwrt'],
+    ['freebsd', 'freebsd'], ['openbsd', 'openbsd'], ['netbsd', 'netbsd'],
+  ];
+
+  // Tiny Sparkline component using an inline SVG polyline
+  Vue.component('sparkline', {
+    props: {
+      data: { type: Array, required: true },
+      // viewBox width for drawing space; SVG width will be 100% of container
+      vbWidth: { type: Number, default: 320 },
+      height: { type: Number, default: 80 },
+      stroke: { type: String, default: '#008771' },
+      strokeWidth: { type: Number, default: 2 },
+      maxPoints: { type: Number, default: 120 },
+      showGrid: { type: Boolean, default: true },
+      gridColor: { type: String, default: 'rgba(0,0,0,0.1)' },
+      fillOpacity: { type: Number, default: 0.15 },
+      showMarker: { type: Boolean, default: true },
+      markerRadius: { type: Number, default: 2.8 },
+      // New opts for axes/labels/tooltip
+      labels: { type: Array, default: () => [] }, // same length as data for x labels (e.g., timestamps)
+      showAxes: { type: Boolean, default: false },
+      yTickStep: { type: Number, default: 25 }, // percent ticks
+      tickCountX: { type: Number, default: 4 },
+      paddingLeft: { type: Number, default: 32 },
+      paddingRight: { type: Number, default: 6 },
+      paddingTop: { type: Number, default: 6 },
+      paddingBottom: { type: Number, default: 20 },
+      showTooltip: { type: Boolean, default: false },
+      // The component was written for CPU percent and hard-clamped values to
+      // 0..100. Throughput is bytes/sec, which pinned every point to the
+      // ceiling and drew a filled block. Opt in to scaling against the series'
+      // own maximum instead. Percent charts keep the fixed 0..100 axis so they
+      // stay comparable with each other.
+      autoscale: { type: Boolean, default: false },
+      // Fit the window to the data instead of pinning it to 0..100.
+      //
+      // A percent series on a FULL-HEIGHT chart is fine against a fixed axis, but
+      // the vitals rows are 24px tall: after the paddings that is 20px of drawing
+      // space for the whole 0..100 range, i.e. one pixel per 5 percentage points.
+      // A server idling between 1% and 4% put every sample on the same pixel row
+      // and drew a dead-straight line - the chart was not broken, it had no
+      // resolution left. Fitting the window restores it.
+      fit: { type: Boolean, default: false },
+      // Floor on the fitted window's height, in data units. Without it a series
+      // that is genuinely constant (disk, or swap at zero) would have its last
+      // decimal place stretched to full height and read as violent activity. With
+      // it, a flat series stays visibly flat and only real movement moves.
+      minSpan: { type: Number, default: 10 },
+      // Position points by their ORDER OF MAGNITUDE rather than linearly.
+      //
+      // Throughput spans about four decades on a real box: an idle VPN panel
+      // trickles ~14 KB/s while a single transfer peaks over 100 MB/s. On a linear
+      // axis scaled to the window's peak, one burst flattens everything else onto
+      // the bottom edge. Measured on this dashboard: with a 105 MB/s peak in the
+      // window, 50 of 60 points rendered at the exact floor pixel, which is the
+      // "throughput chart is a flat line with a couple of needles" complaint.
+      //
+      // Only for byte rates, and only because the exact current value is printed
+      // in full immediately above the chart: the line carries the SHAPE, the
+      // number carries the magnitude. Percent series stay linear, where a fixed
+      // axis means something.
+      logScale: { type: Boolean, default: false },
+    },
+    data() {
+      return {
+        hoverIdx: -1,
+        // The fill gradient is referenced by id. With more than one sparkline
+        // on a page a shared id makes every chart resolve to whichever
+        // <defs> was inserted last, so each instance gets its own.
+        gradId: 'spkGrad-' + (Vue.__spkUid = (Vue.__spkUid || 0) + 1),
+      }
+    },
+    computed: {
+      viewBoxAttr() {
+        return '0 0 ' + this.vbWidth + ' ' + this.height
+      },
+      drawWidth() {
+        return Math.max(1, this.vbWidth - this.paddingLeft - this.paddingRight)
+      },
+      drawHeight() {
+        return Math.max(1, this.height - this.paddingTop - this.paddingBottom)
+      },
+      nPoints() {
+        return Math.min(this.data.length, this.maxPoints)
+      },
+      dataSlice() {
+        const n = this.nPoints
+        if (n === 0) return []
+        return this.data.slice(this.data.length - n)
+      },
+      labelsSlice() {
+        const n = this.nPoints
+        if (!this.labels || this.labels.length === 0 || n === 0) return []
+        const start = Math.max(0, this.labels.length - n)
+        return this.labels.slice(start)
+      },
+      // The value window the drawing area maps onto, as {lo, hi}. Three modes:
+      // autoscale (throughput, bytes/sec: 0 to the peak), fit (short percent
+      // charts: the data's own range, never narrower than minSpan), and the
+      // default fixed 0..100 the axis-bearing CPU chart needs.
+      scaleWindow() {
+        if (this.autoscale) {
+          // 15% headroom so the peak does not sit flush against the top edge.
+          const peak = this.dataSlice.reduce((a, b) => Math.max(a, Number(b) || 0), 0)
+          return { lo: 0, hi: peak > 0 ? peak * 1.15 : 1 }
+        }
+        if (!this.fit || this.dataSlice.length === 0) return { lo: 0, hi: 100 }
+
+        let lo = Infinity, hi = -Infinity
+        for (const raw of this.dataSlice) {
+          const v = Math.max(0, Math.min(100, Number(raw) || 0))
+          if (v < lo) lo = v
+          if (v > hi) hi = v
+        }
+        if (!Number.isFinite(lo)) return { lo: 0, hi: 100 }
+
+        // Widen a too-narrow (or zero-width) range around its own centre, then
+        // slide it back inside 0..100 if the padding pushed it out. Sliding
+        // rather than clamping keeps the window exactly minSpan tall, so a
+        // series sitting at 0% and one sitting at 100% get the same sensitivity.
+        const span = Math.max(hi - lo, this.minSpan)
+        const mid = (lo + hi) / 2
+        lo = mid - span / 2
+        hi = mid + span / 2
+        if (lo < 0) { hi -= lo; lo = 0 }
+        if (hi > 100) { lo -= hi - 100; hi = 100 }
+        return { lo: Math.max(0, lo), hi }
+      },
+      pointsArr() {
+        const n = this.nPoints
+        if (n === 0) return []
+        const slice = this.dataSlice
+        const w = this.drawWidth
+        const h = this.drawHeight
+        const dx = n > 1 ? w / (n - 1) : 0
+        // Coordinates stay FRACTIONAL. Rounding them to whole viewBox units threw
+        // away most of what little vertical resolution these charts have: at 20px
+        // of draw height a rounded y can only take 21 distinct values, so any
+        // series varying by less than one row collapsed to a straight line.
+        return slice.map((v, i) => {
+          const x = this.paddingLeft + i * dx
+          const y = this.paddingTop + (h - this.fraction(v) * h)
+          return [x, y]
+        })
+      },
+      points() {
+        // Two decimals: enough to keep the sub-pixel detail the fractional
+        // coordinates exist for, without emitting 17-digit floats into the DOM.
+        return this.pointsArr.map(p => `${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(' ')
+      },
+      areaPath() {
+        if (this.pointsArr.length === 0) return ''
+        const first = this.pointsArr[0]
+        const last = this.pointsArr[this.pointsArr.length - 1]
+        const line = this.points
+        // Close to bottom to create an area fill
+        return `M ${first[0]},${this.paddingTop + this.drawHeight} L ${line.replace(/ /g, ' L ')} L ${last[0]},${this.paddingTop + this.drawHeight} Z`
+      },
+      gridLines() {
+        if (!this.showGrid) return []
+        const h = this.drawHeight
+        const w = this.drawWidth
+        // draw at 25%, 50%, 75%
+        return [0, 0.25, 0.5, 0.75, 1]
+          .map(r => Math.round(this.paddingTop + h * r))
+          .map(y => ({ x1: this.paddingLeft, y1: y, x2: this.paddingLeft + w, y2: y }))
+      },
+      lastPoint() {
+        if (this.pointsArr.length === 0) return null
+        return this.pointsArr[this.pointsArr.length - 1]
+      },
+      yTicks() {
+        if (!this.showAxes) return []
+        const step = Math.max(1, this.yTickStep)
+        const ticks = []
+        for (let p = 0; p <= 100; p += step) {
+          const y = Math.round(this.paddingTop + (this.drawHeight - (p / 100) * this.drawHeight))
+          ticks.push({ y, label: `${p}%` })
+        }
+        return ticks
+      },
+      xTicks() {
+        if (!this.showAxes) return []
+        const labels = this.labelsSlice
+        const n = this.nPoints
+        const m = Math.max(2, this.tickCountX)
+        const ticks = []
+        if (n === 0) return ticks
+        const w = this.drawWidth
+        const dx = n > 1 ? w / (n - 1) : 0
+        const positions = []
+        for (let i = 0; i < m; i++) {
+          const idx = Math.round((i * (n - 1)) / (m - 1))
+          positions.push(idx)
+        }
+        positions.forEach(idx => {
+          const label = labels[idx] != null ? String(labels[idx]) : String(idx)
+          const x = Math.round(this.paddingLeft + idx * dx)
+          ticks.push({ x, label })
+        })
+        return ticks
+      },
+    },
+    methods: {
+      // Where a value sits in the window, 0 (bottom) to 1 (top).
+      fraction(v) {
+        const { lo, hi } = this.scaleWindow
+        const clamped = Math.max(lo, Math.min(hi, Number(v) || 0))
+        if (this.logScale) {
+          // log1p, so a zero rate lands cleanly on the floor instead of at -inf.
+          const top = Math.log1p(hi - lo)
+          return top > 0 ? Math.log1p(clamped - lo) / top : 0
+        }
+        return (clamped - lo) / (hi - lo || 1)
+      },
+      onMouseMove(evt) {
+        if (!this.showTooltip || this.pointsArr.length === 0) return
+        const rect = evt.currentTarget.getBoundingClientRect()
+        const px = evt.clientX - rect.left
+        // translate to viewBox space
+        const x = (px / rect.width) * this.vbWidth
+        const n = this.nPoints
+        const dx = n > 1 ? this.drawWidth / (n - 1) : 0
+        const idx = Math.max(0, Math.min(n - 1, Math.round((x - this.paddingLeft) / (dx || 1))))
+        this.hoverIdx = idx
+      },
+      onMouseLeave() {
+        this.hoverIdx = -1
+      },
+      fmtHoverText() {
+        const labels = this.labelsSlice
+        const idx = this.hoverIdx
+        if (idx < 0 || idx >= this.dataSlice.length) return ''
+        const raw = Math.max(0, Math.min(100, Number(this.dataSlice[idx] || 0)))
+        const val = Number.isFinite(raw) ? raw.toFixed(2) : raw
+        const lab = labels[idx] != null ? labels[idx] : ''
+        return `${val}%${lab ? ' • ' + lab : ''}`
+      },
+    },
+    template: `
+      <svg width="100%" :height="height" :viewBox="viewBoxAttr" preserveAspectRatio="none" class="idx-cpu-history-svg"
+           @mousemove="onMouseMove" @mouseleave="onMouseLeave">
+        <defs>
+          <linearGradient :id="gradId" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" :stop-color="stroke" :stop-opacity="fillOpacity"/>
+            <stop offset="100%" :stop-color="stroke" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <g v-if="showGrid">
+          <line v-for="(g,i) in gridLines" :key="i" :x1="g.x1" :y1="g.y1" :x2="g.x2" :y2="g.y2" :stroke="gridColor" stroke-width="1" class="cpu-grid-line" />
+        </g>
+        <g v-if="showAxes">
+          <!-- Y ticks/labels -->
+          <g v-for="(t,i) in yTicks" :key="'y'+i">
+            <text class="cpu-grid-y-text" :x="Math.max(0, paddingLeft - 4)" :y="t.y + 4" text-anchor="end" font-size="10" fill="rgba(0,0,0,0.3)" v-text="t.label"></text>
+          </g>
+          <!-- X ticks/labels -->
+          <g v-for="(t,i) in xTicks" :key="'x'+i">
+            <text class="cpu-grid-x-text" :x="t.x" :y="paddingTop + drawHeight + 22" text-anchor="middle" font-size="10" fill="rgba(0,0,0,0.3)" v-text="t.label"></text>
+          </g>
+        </g>
+        <path v-if="areaPath" :d="areaPath" :fill="'url(#' + gradId + ')'" stroke="none" />
+        <polyline :points="points" fill="none" :stroke="stroke" :stroke-width="strokeWidth" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle v-if="showMarker && lastPoint" :cx="lastPoint[0]" :cy="lastPoint[1]" :r="markerRadius" :fill="stroke" />
+        <!-- Hover marker/tooltip -->
+        <g v-if="showTooltip && hoverIdx >= 0">
+          <line class="cpu-grid-h-line" :x1="pointsArr[hoverIdx][0]" :x2="pointsArr[hoverIdx][0]" :y1="paddingTop" :y2="paddingTop + drawHeight" stroke="rgba(0,0,0,0.2)" stroke-width="1" />
+          <circle :cx="pointsArr[hoverIdx][0]" :cy="pointsArr[hoverIdx][1]" r="3.5" :fill="stroke" />
+          <text class="cpu-grid-text" :x="pointsArr[hoverIdx][0]" :y="paddingTop + 12" text-anchor="middle" font-size="11" fill="rgba(0,0,0,0.8)" v-text="fmtHoverText()"></text>
+        </g>
+      </svg>
+    `,
+  })
+
+
+  class CurTotal {
+
+    constructor(current, total) {
+      this.current = current;
+      this.total = total;
+    }
+
+    get percent() {
+      if (this.total === 0) {
+        return 0;
+      }
+      return NumberFormatter.toFixed(this.current / this.total * 100, 2);
+    }
+
+    get color() {
+      const percent = this.percent;
+      if (percent < 80) {
+        return '#008771'; // Green
+      } else if (percent < 90) {
+        return "#f37b24"; // Orange
+      } else {
+        return "#cf3c3c"; // Red
+      }
+    }
+  }
+
+  class Status {
+    constructor(data) {
+      this.cpu = new CurTotal(0, 0);
+      this.cpuCores = 0;
+      this.logicalPro = 0;
+      this.cpuSpeedMhz = 0;
+      this.cpuSpeedCurMhz = 0;
+      this.disk = new CurTotal(0, 0);
+      this.loads = [0, 0, 0];
+      this.mem = new CurTotal(0, 0);
+      this.netIO = { up: 0, down: 0 };
+      this.swapIO = { in: 0, out: 0 };
+      this.diskIO = { read: 0, write: 0 };
+      this.netTraffic = { sent: 0, recv: 0 };
+      this.publicIP = { ipv4: 0, ipv6: 0 };
+      this.swap = new CurTotal(0, 0);
+      this.tcpCount = 0;
+      this.udpCount = 0;
+      this.uptime = 0;
+      this.appUptime = 0;
+      this.appStats = { threads: 0, mem: 0, uptime: 0 };
+      // This class copies fields explicitly, so anything added to the Go
+      // Status struct must be listed here too or it is silently dropped.
+      this.cpuModel = "";
+      this.osName = "";
+      this.osVersion = "";
+      this.kernel = "";
+      this.hostname = "";
+      this.virt = { virtualized: false, system: "", kind: "" };
+      this.memHW = { totalBytes: 0, type: "", speedMTs: 0 };
+      this.netIOByIface = [];
+
+      this.xray = { state: 'stop', stateMsg: "", errorMsg: "", version: "", color: "" };
+
+      if (data == null) {
+        return;
+      }
+
+      this.cpu = new CurTotal(data.cpu, 100);
+      this.cpuCores = data.cpuCores;
+      this.logicalPro = data.logicalPro;
+      this.cpuSpeedMhz = data.cpuSpeedMhz;
+      this.cpuSpeedCurMhz = data.cpuSpeedCurMhz;
+      this.cpuModel = data.cpuModel || "";
+      this.osName = data.osName || "";
+      this.osVersion = data.osVersion || "";
+      this.kernel = data.kernel || "";
+      this.hostname = data.hostname || "";
+      this.virt = data.virt || { virtualized: false, system: "", kind: "" };
+      this.memHW = data.memHW || { totalBytes: 0, type: "", speedMTs: 0 };
+      this.netIOByIface = data.netIOByIface || [];
+      this.disk = new CurTotal(data.disk.current, data.disk.total);
+      this.loads = data.loads.map(load => NumberFormatter.toFixed(load, 2));
+      this.mem = new CurTotal(data.mem.current, data.mem.total);
+      this.netIO = data.netIO;
+      this.swapIO = data.swapIO || { in: 0, out: 0 };
+      this.diskIO = data.diskIO || { read: 0, write: 0 };
+      this.netTraffic = data.netTraffic;
+      this.publicIP = data.publicIP;
+      this.swap = new CurTotal(data.swap.current, data.swap.total);
+      this.tcpCount = data.tcpCount;
+      this.udpCount = data.udpCount;
+      this.uptime = data.uptime;
+      this.appUptime = data.appUptime;
+      this.appStats = data.appStats;
+      this.xray = data.xray;
+      switch (this.xray.state) {
+        case 'running':
+          this.xray.color = "green";
+          this.xray.stateMsg = '{{ i18n "pages.index.xrayStatusRunning" }}';
+          break;
+        case 'stop':
+          this.xray.color = "orange";
+          this.xray.stateMsg = '{{ i18n "pages.index.xrayStatusStop" }}';
+          break;
+        case 'error':
+          this.xray.color = "red";
+          this.xray.stateMsg = '{{ i18n "pages.index.xrayStatusError" }}';
+          break;
+        default:
+          this.xray.color = "gray";
+          this.xray.stateMsg = '{{ i18n "pages.index.xrayStatusUnknown" }}';
+          break;
+      }
+    }
+  }
+
+  const versionModal = {
+    visible: false,
+    versions: [],
+    show(versions) {
+      this.visible = true;
+      this.versions = versions;
+    },
+    hide() {
+      this.visible = false;
+    },
+  };
+
+  const logModal = {
+    visible: false,
+    logs: [],
+    rows: 20,
+    level: 'info',
+    syslog: false,
+    loading: false,
+    // 'panel' is the Xray error popover (panel log only), 'core' is one named
+    // core's own output (the Xray tile's log button), 'all' is the Manage tile's
+    // (panel plus every core). The modal's own controls re-run whichever one
+    // opened it, so changing the row count cannot silently switch views.
+    mode: 'panel',
+    // Which core 'core' mode is showing, so a reload asks for the same one.
+    coreName: '',
+    // Plain-text mirror of what is on screen, for the download button. The
+    // rendered copy is HTML and the aggregated view has no `logs` array.
+    plain: '',
+    // The fetched log, kept as [{source, text}] so the level and core filters
+    // can re-render without going back to the server for every checkbox click.
+    entries: [],
+    // Distinct cores present, and which are currently shown. Rebuilt wholesale
+    // on each fetch: assigning a NEW object is what makes Vue 2 track keys that
+    // did not exist when the data option was declared.
+    sources: [],
+    enabled: {},
+    // Live tail. The timer lives in LiveLog, keyed, so closing the modal can
+    // never leave one polling in the background.
+    live: false,
+    // Core list from the last manual open. A live tick reuses it instead of
+    // re-asking which cores exist every few seconds; that set changes only when
+    // an operator installs or removes a core, which is not a live-tail event.
+    coreList: null,
+    show(logs) {
+      this.visible = true;
+      this.mode = 'panel';
+      this.logs = logs;
+      this.render([{ source: 'vpn-ui', text: (logs || []).join('\n') }]);
+    },
+    // Every log the panel shows goes through LogFormatter, so the panel's own
+    // lines, Xray's and each daemon's are coloured and laid out identically.
+    // `entries` is [{source, text}]; the source becomes a badge on EVERY line,
+    // which is what makes the aggregated view attributable when scrolled.
+    render(entries) {
+      this.entries = entries || [];
+      this.sources = LogFormatter.sourcesOf(this.entries);
+      // Preserve a core's checked state across reloads; default new ones to on.
+      const keep = this.enabled || {};
+      const next = {};
+      for (const s of this.sources) next[s] = keep[s] !== false;
+      this.enabled = next;
+      this.apply();
+    },
+    // Re-render from the already-fetched entries. The level floor is applied
+    // here as well as server-side, because only the PANEL log is filtered by
+    // the backend: core logs are raw daemon output, so before this the level
+    // picker silently did nothing to them.
+    apply() {
+      const opts = {
+        level: this.level,
+        sources: this.sources.filter((s) => this.enabled[s] !== false),
+      };
+      this.plain = LogFormatter.plain(this.entries, opts);
+      const html = LogFormatter.render(this.entries, opts);
+      this.formattedLogs = html || '<div class="log-empty">No Record...</div>';
+    },
+    setAllSources(on) {
+      const next = {};
+      for (const s of this.sources) next[s] = on;
+      this.enabled = next;
+      this.apply();
+    },
+    // Aggregated view for the Manage tile: the panel log, Xray and every core in
+    // one stream. It used to be per-core sections under headings, so the only
+    // way to tell whose line you were reading was to scroll back to the nearest
+    // heading; now the core name rides on the line itself.
+    showSections(sections) {
+      this.visible = true;
+      this.mode = 'all';
+      this.logs = [];
+      this.render((sections || []).map((s) => ({ source: s.name, text: s.text })));
+    },
+    // A single core's output, badged with its name so it reads the same as the
+    // aggregated view and the download button still has plain text to hand over.
+    showCore(name, text) {
+      this.visible = true;
+      this.mode = 'core';
+      this.coreName = name;
+      this.logs = [];
+      this.render([{ source: name, text: text || '' }]);
+    },
+    hide() {
+      this.visible = false;
+      this.setLive(false);
+    },
+    setLive(on) {
+      this.live = !!on;
+      LiveLog.stop('panel-log');
+      if (this.live) {
+        // The aggregated view issues one request per core per tick, so it runs at
+        // half the rate of the single-source views.
+        const everyMs = this.mode === 'all' ? LiveLog.INTERVAL_MS * 2 : LiveLog.INTERVAL_MS;
+        LiveLog.start('panel-log', () => {
+          if (!logModal.visible) { logModal.setLive(false); return; }
+          app.reloadLogs(true);
+        }, everyMs);
+      }
+    },
+  };
+
+  const xraylogModal = {
+      visible: false,
+      logs: [],
+      live: false,
+      rows: 20,
+      showDirect: true,
+      showBlocked: true,
+      showProxy: true,
+      loading: false,
+      show(logs) {
+        this.visible = true;
+        this.logs = logs;
+        this.formattedLogs = this.logs?.length > 0 ? this.formatLogs(this.logs) : "No Record...";
+      },
+      formatLogs(logs) {
+        let formattedLogs = `
+<style>
+  table {
+    border-collapse: collapse;
+    width: auto;
+  }
+
+  table td, table th {
+    padding: 2px 15px;
+  }
+</style>
+
+<table>
+    <tr>
+        <th>Date</th>
+        <th>From</th>
+        <th>To</th>
+        <th>Inbound</th>
+        <th>Outbound</th>
+        <th>Email</th>
+    </tr>
+`;
+
+        logs.reverse().forEach((log, index) => {
+          let outboundColor = '';
+          if (log.Event === 1) {
+            outboundColor = ' style="color: var(--error);"'; // blocked
+          }
+          else if (log.Event === 2) {
+            outboundColor = ' style="color: var(--info);"'; // proxied
+          }
+
+          let text = ``;
+          if (log.Email !== "") {
+            text = `<td>${log.Email}</td>`;
+          }
+
+          formattedLogs += `
+<tr ${outboundColor}>
+    <td><b>${IntlUtil.formatDate(log.DateTime)}</b></td>
+    <td>${log.FromAddress}</td>
+    <td>${log.ToAddress}</td>
+    <td>${log.Inbound}</td>
+    <td>${log.Outbound}</td>
+    ${text}
+</tr>
+`;
+        });
+
+        return formattedLogs += "</table>";
+      },
+      hide() {
+        this.visible = false;
+        this.setLive(false);
+      },
+      setLive(on) {
+        this.live = !!on;
+        LiveLog.stop('xray-access-log');
+        if (this.live) {
+          LiveLog.start('xray-access-log', () => {
+            if (!xraylogModal.visible) { xraylogModal.setLive(false); return; }
+            app.openXrayLogs(true);
+          });
+        }
+      },
+    };
+  const backupModal = {
+    visible: false,
+    show() {
+      this.visible = true;
+    },
+    hide() {
+      this.visible = false;
+    },
+  };
+
+  // Which components the downloaded .db is named after. Held as the names the
+  // server reads off the query string, so nothing has to be translated between
+  // the tick and the request.
+  //
+  // All four to start with: the picker exists to let an operator take parts AWAY
+  // from the full name, so the default has to be the full name.
+  const backupNameModal = {
+    visible: false,
+    parts: ['panelName', 'domain', 'date', 'time'],
+    show() {
+      this.visible = true;
+    },
+    hide() {
+      this.visible = false;
+    },
+  };
+
+  // The order the components appear in, which is the SERVER's order and not the
+  // order they were ticked in. Kept beside the state so the preview and the
+  // request cannot disagree about it.
+  const BACKUP_NAME_ORDER = ['panelName', 'domain', 'date', 'time'];
+
+  const customGeoColumns = [
+    { title: '{{ i18n "pages.index.customGeoExtColumn" }}', key: 'extDat', scopedSlots: { customRender: 'extDat' }, ellipsis: true },
+    { title: '{{ i18n "pages.index.customGeoLastUpdated" }}', key: 'lastUpdatedAt', scopedSlots: { customRender: 'lastUpdatedAt' }, width: 160 },
+    { title: '{{ i18n "pages.index.customGeoActions" }}', key: 'action', scopedSlots: { customRender: 'action' }, width: 120, fixed: 'right' },
+  ];
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    mixins: [MediaQueryMixin],
+    data: {
+      themeSwitcher,
+      loadingStates: {
+        fetched: false,
+        spinning: false
+      },
+      status: new Status(),
+  cpuHistory: [], // small live widget history
+  cpuHistoryLong: [], // aggregated points from backend
+  cpuHistoryLabels: [],
+  cpuHistoryModal: { visible: false, bucket: 2 },
+      versionModal,
+      logModal,
+      xraylogModal,
+      backupModal,
+      backupNameModal,
+      loadingTip: '{{ i18n "loading"}}',
+      showAlert: false,
+      showIp: false,
+      ipLimitEnable: false,
+      // Starts false so the access-log button cannot flash on and then vanish
+      // for the common case, which is that the log is off.
+      xrayAccessLogEnable: false,
+      customGeoColumns,
+      customGeoList: [],
+      customGeoLoading: false,
+      customGeoUpdatingAll: false,
+      customGeoActionId: null,
+      customGeoModal: {
+        visible: false,
+        editId: null,
+        saving: false,
+        form: {
+          type: 'geosite',
+          alias: '',
+          url: '',
+        },
+      },
+      customGeoValidation: {
+        alias: '{{ i18n "pages.index.customGeoValidationAlias" }}',
+        url: '{{ i18n "pages.index.customGeoValidationUrl" }}',
+      },
+      coreStatuses: [],
+      panelUpdate: { checking: false, checked: false, available: false, latest: '', current: '', notes: '', publishedAt: '', url: '', updating: false, cancelling: false, error: '', percent: 0, phase: '', speed: 0, bytes: 0, total: 0 },
+      // The dialog that asks which of the two manual-update sources to use. It holds
+      // nothing else: whichever is picked hands straight over to that source's own
+      // flow, which owns everything from there.
+      manualModal: { visible: false },
+      // The address prompt for a manual update the SERVER downloads. `fetching` holds
+      // the dialog open and disarmed for the length of that download, which on the
+      // links this exists for is minutes rather than seconds.
+      urlModal: { visible: false, url: '', fetching: false },
+      // Manual-update confirmation, shared by both sources. `info` is what the SERVER
+      // read out of the binary it is holding, never anything derived from a filename
+      // or a URL; `typed` is the downgrade confirmation the operator has to spell
+      // out; `source` only picks the dialog's title.
+      uploadModal: { visible: false, typed: '', source: 'file', info: { token: '', current: '', new: '', direction: '', size: 0 } },
+      // Panel egress location, checked when the overview opens (see
+      // fetchPanelLocation). `checked` is what lets the row distinguish "still
+      // looking" from "looked and failed".
+      panelLoc: { checked: false, found: false, countryCode: '', ipv4: '', ipv6: '' },
+      // The release-notes dialog shown before an update is armed.
+      updateModal: { visible: false },
+      // Opened only by the server's one-shot post-update record; see
+      // announceUpdateResult().
+      // `backup` is where the pre-update DB snapshot landed, empty when there
+      // isn't one.
+      updatedModal: { visible: false, from: '', to: '', backup: '' },
+      // `copied` is the index of the row showing its "copied" confirmation, or
+      // -1 for none. An index rather than a boolean so two rows carrying the
+      // SAME address (several chains share one) confirm independently.
+      donateModal: { visible: false, copied: -1 },
+      // Rendered from web/controller/donate.go, which a test pins to README.md's
+      // Donate section. Emitted here as JS rather than as markup so each address
+      // lands in a JS string context, where html/template escapes it correctly -
+      // interpolating one into a Vue attribute expression instead would leave the
+      // escaping to whatever context the attribute happened to be classified as.
+      donateList: [{{ range .donate }}{ chain: '{{ .Chain }}', addr: '{{ .Address }}' },{{ end }}],
+      geofilesModal: { visible: false },
+      // Which geo files are actually on disk. Four of the six the list offers do
+      // not ship with the panel, and until this is fetched the list has no way to
+      // say so: every row looks identical whether the file is there or not.
+      geofileStatus: [],
+      // Emitted as JS rather than into the Vue attribute that consumes them, so
+      // html/template escapes them as JS strings (see donateList above). An
+      // apostrophe in a translation would otherwise end the attribute's string.
+      geofileText: {
+        installed: '{{ i18n "pages.index.geofileInstalled" }}',
+        notInstalled: '{{ i18n "pages.index.geofileNotInstalled" }}',
+        // Emitted here, not into the a-tooltip's :title, for the reason above: a
+        // translation with an apostrophe pasted into a Vue attribute expression
+        // ends the attribute's string and blanks the whole page with an empty console.
+        autoUpdateDesc: '{{ i18n "pages.index.geofileAutoUpdateDesc" }}',
+      },
+      // The server-side geofile download, mirrored here so the dialog can show a
+      // transfer it did not start. Leaving the overview destroys this whole Vue
+      // instance (navigation is a full page load, see aSidebar.openLink), so the
+      // ONLY way progress can survive is to re-read it from the server - which is
+      // what geofileRunPoll does on open and on mount.
+      geofileRun: { running: false, done: false, files: [], current: '', fetched: [], failed: false, summary: '' },
+      geofileRunTimer: null,
+      geofileRunSeq: 0,
+      // True only between "we sent the POST" and "it answered". Until the server has
+      // claimed the run, its progress endpoint still describes the previous one.
+      geofileRunPosting: false,
+      // Drives watchPanelUpdate, which follows a self-update this page did not start.
+      panelUpdateTimer: null,
+      panelUpdateReloadArmed: false,
+      // Whether the panel refreshes the geo data on its own. On by default; the real
+      // value arrives with the defaultSettings call in mounted().
+      geofileAutoUpdate: true,
+      geofileAutoUpdateSaving: false,
+      distroModal: { visible: false, pretty: '', tested: '' },
+
+      // --- redesign shell + bento tiles ---------------------------------
+      pageTitle: '{{ i18n "menu.dashboard" }}',
+      pageClass: 'index-page',
+      // Distro name for the identity tile. Populated by checkDistroSupport()
+      // regardless of whether the unsupported-distro warning fires.
+      distroPretty: '',
+      // Rolling client-side history for the vitals sparklines and the
+      // throughput chart. The server only persists CPU history
+      // (/panel/api/server/cpuHistory); everything else is accumulated here
+      // from the same websocket status push that already drives the page, so
+      // it starts empty and fills in over roughly two minutes.
+      HISTORY_POINTS: 60,
+      history: { cpu: [], mem: [], swap: [], disk: [], up: [], down: [] },
+      // Custom server name, persisted server-side. Falls back to the distro
+      // name, then the hostname.
+      serverName: '',
+      // '' means every interface, which is what the aggregate netIO already is.
+      ifaceFilter: '',
+      userStats: { total: 0, online: 0, depleted: 0, expiring: 0 },
+    },
+    computed: {
+      // geofileStatus keyed by file name, for the Geofiles list. Empty until the
+      // fetch lands (or if it fails), and the list checks for a row before
+      // rendering one, so an unreachable endpoint shows no badge rather than a
+      // wrong one.
+      geofileStatusByName() {
+        const byName = {};
+        (this.geofileStatus || []).forEach(state => { byName[state.name] = state; });
+        return byName;
+      },
+      // Identity tile. A user-set name wins; otherwise the distro name; the
+      // hostname is the last resort so the tile is never blank.
+      // Hostname, not distro: the distro now has its own line below, and
+      // printing it twice was the old behaviour this replaced.
+      // The machine's own hostname, not the browser Host header ({{ .host }}),
+      // which is usually just the IP the admin typed.
+      serverLabel() {
+        return this.serverName || this.status.hostname || '{{ .host }}';
+      },
+      // The name /getDb is about to send back, assembled the way the server does
+      // it (BuildBackupFilename in web/service/server.go): the stem, then the
+      // ticked components joined by "_".
+      //
+      // The panel name and the domain arrive already sanitized from the server so
+      // the two cannot disagree on what a space or a unicode label becomes. Date
+      // and time are the browser's clock while the file carries the server's, so
+      // those digits can differ by a timezone. That is fine for what this is for:
+      // showing WHICH parts appear, and above all that unticking every box is a
+      // real choice that really does yield a bare vpn-ui.db.
+      backupFilename() {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const values = {
+          panelName: '{{ .backup_panel_name }}',
+          domain: '{{ .backup_domain }}',
+          date: '' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()),
+          time: pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()),
+        };
+        const picked = BACKUP_NAME_ORDER
+          .filter(part => this.backupNameModal.parts.includes(part))
+          .map(part => values[part])
+          .filter(Boolean);
+        return 'vpn-ui' + (picked.length ? '_' + picked.join('_') : '') + '.db';
+      },
+      // "Ubuntu 24.04 - kernel 6.8.0-31-generic", degrading gracefully when the
+      // backend has not supplied a field.
+      osLine() {
+        const s = this.status;
+        const os = [s.osName, s.osVersion].filter(Boolean).join(' ');
+        const kern = s.kernel ? 'kernel ' + s.kernel : '';
+        return [os || this.distroPretty, kern].filter(Boolean).join('  ·  ');
+      },
+      // "16.00 GB DDR4 at 3200 MT/s", dropping whatever the firmware would not
+      // name. Capacity prefers the SMBIOS module sum over MemTotal: it is the
+      // hardware fact this row is about, it is the number the operator bought,
+      // and it is what the DDR generation beside it describes. MemTotal is a few
+      // percent lower (the kernel excludes firmware-reserved regions) and stays
+      // the source for the Memory usage tile, which is a different question.
+      ramText() {
+        const hw = this.status.memHW || {};
+        const bytes = hw.totalBytes || (this.status.mem && this.status.mem.total) || 0;
+        if (!bytes) return '';
+        const speed = hw.speedMTs ? 'at ' + hw.speedMTs + ' MT/s' : '';
+        return [SizeFormatter.sizeFormat(bytes), hw.type, speed].filter(Boolean).join(' ');
+      },
+      // "Yes (KVM)" / "Yes" when the platform couldn't be named / "No".
+      // The kind ("container") is worth surfacing because it changes what the
+      // setup flow can do: a container shares the host kernel, so its module
+      // steps are not the operator's to fix.
+      virtText() {
+        const v = this.status.virt || {};
+        if (!v.virtualized) return '{{ i18n "pages.index.virtNo" }}';
+        const detail = [v.system, v.kind === 'container' ? '{{ i18n "pages.index.virtContainer" }}' : '']
+          .filter(Boolean).join(', ');
+        const yes = '{{ i18n "pages.index.virtYes" }}';
+        return detail ? yes + ' (' + detail + ')' : yes;
+      },
+      // Release notes arrive as GitHub Markdown. They are rendered with v-html,
+      // so the text is escaped FIRST and only the handful of constructs the
+      // panel's own notes use are turned back into markup afterwards. Nothing
+      // here can reintroduce a tag: every < > & " ' is already an entity by the
+      // time the patterns below run, and the link pattern rebuilds the href from
+      // a matched http(s) URL rather than passing one through.
+      releaseNotesHtml() {
+        const raw = (this.panelUpdate.notes || '').trim();
+        if (!raw) return '<p class="bo-relnotes-empty">{{ i18n "pages.index.updateNoNotes" }}</p>';
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => map[c]);
+        const inline = (s) => esc(s)
+          .replace(/`([^`]+)`/g, '<code>$1</code>')
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+            (m, t, u) => '<a href="' + u + '" target="_blank" rel="noopener">' + t + '</a>');
+
+        const out = [];
+        let list = false;
+        const closeList = () => { if (list) { out.push('</ul>'); list = false; } };
+        for (const line of raw.split(/\r?\n/)) {
+          const t = line.trim();
+          if (!t) { closeList(); continue; }
+          const h = t.match(/^(#{1,6})\s+(.*)$/);
+          if (h) { closeList(); out.push('<h4>' + inline(h[2]) + '</h4>'); continue; }
+          const li = t.match(/^[-*+]\s+(.*)$/);
+          if (li) {
+            if (!list) { out.push('<ul>'); list = true; }
+            out.push('<li>' + inline(li[1]) + '</li>');
+            continue;
+          }
+          closeList();
+          out.push('<p>' + inline(t) + '</p>');
+        }
+        closeList();
+        return out.join('');
+      },
+      // "United States <flag>". Empty (row hidden) until the background lookup
+      // lands or when the country could not be determined.
+      panelLocationText() {
+        if (!this.panelLoc.checked) return '';
+        const label = GeoUtil.label(this.panelLoc.countryCode);
+        return label || '{{ i18n "pages.index.panelLocationError" }}';
+      },
+      // Dim the row when it is carrying the failure message rather than a place.
+      panelLocationFailed() {
+        return this.panelLoc.checked && !GeoUtil.label(this.panelLoc.countryCode);
+      },
+      releaseDateText() {
+        const d = this.panelUpdate.publishedAt ? new Date(this.panelUpdate.publishedAt) : null;
+        return d && !isNaN(d.getTime()) ? d.toLocaleDateString() : '';
+      },
+      // A downgrade has to be spelled out before OK arms. Every other direction is a
+      // plain confirmation, because installing a newer or identical build is not the
+      // move that needs slowing down.
+      uploadOkArmed() {
+        if (this.uploadModal.info.direction !== 'downgrade') return true;
+        const want = String(this.uploadModal.info.new || '').replace(/^v/, '');
+        const typed = String(this.uploadModal.typed || '').replace(/^v/, '');
+        return want !== '' && typed === want;
+      },
+      cpuLine() {
+        const s = this.status;
+        const parts = [];
+        if (s.cpuModel) parts.push(s.cpuModel);
+        parts.push(CPUFormatter.cpuCoreFormat(s.cpuCores));
+        if (s.cpuSpeedMhz) parts.push(CPUFormatter.cpuSpeedFormat(s.cpuSpeedMhz));
+        return parts.filter(Boolean).join('  ·  ');
+      },
+      // status.osName is os-release NAME, falling back to ID, so it is a
+      // display string ("Arch Linux", "Pop!_OS", "Red Hat Enterprise Linux")
+      // rather than a stable key. Match it against DISTRO_MARKS, which is
+      // ordered so that derivatives win over what they derive from: "Kubuntu"
+      // contains "ubuntu" and "Omarchy" contains "arch", so those two would
+      // otherwise be swallowed. Falls back to Tux.
+      distroKey() {
+        const hay = (this.status.osName + ' ' + this.distroPretty).toLowerCase();
+        const hit = DISTRO_MARKS.find(([needle]) => hay.includes(needle));
+        return hit ? hit[1] : 'linux';
+      },
+      distroMask() {
+        return 'url("' + basePath + 'assets/img/distro/' + this.distroKey + '.svg")';
+      },
+      ifaceNames() {
+        const m = this.status.netIOByIface;
+        if (!m) return [];
+        return Array.isArray(m) ? m.map(x => x.name) : Object.keys(m);
+      },
+      // Read and write combined, which is what the swap and storage graphs
+      // plot. Direction is not split out: these rows carry one line each, and
+      // for "is it busy" the total is the question being asked.
+      swapIoRate() {
+        const io = this.status.swapIO || {};
+        return (Number(io.in) || 0) + (Number(io.out) || 0);
+      },
+      diskIoRate() {
+        const io = this.status.diskIO || {};
+        return (Number(io.read) || 0) + (Number(io.write) || 0);
+      },
+      // Ring + sparkline rows, so the template can v-for instead of repeating
+      // four near-identical blocks.
+      vitals() {
+        // Called through the object, not detached: sizeFormat reads this.ONE_KB,
+        // so `const sz = SizeFormatter.sizeFormat` loses its receiver and throws.
+        const sz = (v) => SizeFormatter.sizeFormat(v);
+        return [
+          {
+            key: 'cpu', icon: 'cpu', label: '{{ i18n "pages.index.cpu" }}',
+            percent: this.status.cpu.percent,
+            // Cores  ·  clock, the same two-part shape the swap and disk rows use.
+            //
+            // cpuSpeedCurMhz FIRST, and that is the whole point of the field: this
+            // row is a live readout, and cpuSpeedMhz is the speed the chip is RATED
+            // for, which never moves (4900 on the machine this was written on, the
+            // literal cpuinfo_max_freq). The spec tile above still shows the rated
+            // one, where it belongs. Falls back to it only on a host with no
+            // cpufreq and no "cpu MHz" - usually a VM, where there is no live clock
+            // to read - and shows nothing at all rather than a confident 0.00 MHz.
+            meta: CPUFormatter.cpuCoreFormat(this.status.cpuCores)
+              + ((this.status.cpuSpeedCurMhz || this.status.cpuSpeedMhz)
+                ? '  ·  ' + CPUFormatter.cpuSpeedFormat(
+                    this.status.cpuSpeedCurMhz || this.status.cpuSpeedMhz)
+                : ''),
+          },
+          {
+            key: 'mem', icon: 'ram', label: '{{ i18n "pages.index.memory" }}',
+            percent: this.status.mem.percent,
+            meta: sz(this.status.mem.current) + ' / ' + sz(this.status.mem.total),
+          },
+          // rate:true switches the chart from the fixed percent window to the
+          // autoscaled log one the throughput charts use, because these two now
+          // plot bytes/sec rather than a 0..100 percentage. The ring and the
+          // headline figure still show USAGE; only the graph is I/O.
+          {
+            key: 'swap', icon: 'swap', label: '{{ i18n "pages.index.swap" }}',
+            percent: this.status.swap.percent, rate: true,
+            meta: sz(this.status.swap.current) + ' / ' + sz(this.status.swap.total)
+              + '  ·  ' + sz(this.swapIoRate) + '/s',
+          },
+          {
+            key: 'disk', icon: 'disk', label: '{{ i18n "pages.index.storage" }}',
+            percent: this.status.disk.percent, rate: true,
+            meta: sz(this.status.disk.current) + ' / ' + sz(this.status.disk.total)
+              + '  ·  ' + sz(this.diskIoRate) + '/s',
+          },
+        ];
+      },
+      coreStateCounts() {
+        const cores = this.vpnCoreStatuses();
+        const n = (k) => cores.filter(c => this.coreStateKey(c.state) === k).length;
+        return {
+          total: cores.length,
+          running: n('running'), idle: n('idle'),
+          stopped: n('stopped'), error: n('error'), off: n('off'),
+        };
+      },
+      allCoresHealthy() {
+        return this.coreStateCounts.error === 0;
+      },
+      // Counts rather than prose, so the tile stays honest without needing new
+      // translated strings for every health phrasing.
+      healthSummary() {
+        const c = this.coreStateCounts;
+        return c.running + ' / ' + c.total;
+      },
+      vpnSummary() {
+        const c = this.coreStateCounts;
+        return [c.running, c.idle, c.stopped + c.error].join(' / ');
+      },
+      xrayPillClass() {
+        return {
+          green: 'bo-status-pill--ok',
+          orange: 'bo-status-pill--warn',
+          red: 'bo-status-pill--error',
+        }[this.status.xray.color] || '';
+      },
+      xrayDotClass() {
+        return {
+          green: 'bo-dot--ok',
+          orange: 'bo-dot--warn',
+          red: 'bo-dot--error',
+        }[this.status.xray.color] || '';
+      },
+      // The sparkline paints `stroke` as an SVG presentation attribute, where
+      // a CSS var() never resolves, so the token has to be read out to a
+      // concrete colour here. Touching currentTheme/isUltra keeps this
+      // reactive, so the charts recolour when the theme is toggled.
+      chartColors() {
+        const _theme = themeSwitcher.currentTheme + String(themeSwitcher.isUltra);
+        const read = (name, fallback) => {
+          try {
+            const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+            return v || fallback;
+          } catch (e) { return fallback; }
+        };
+        return {
+          accent: read('--accent', '#008771'),
+          info: read('--info', '#1890ff'),
+        };
+      },
+      connRatio() {
+        const t = Number(this.status.tcpCount) || 0;
+        const u = Number(this.status.udpCount) || 0;
+        const total = t + u;
+        if (!total) return { tcp: '50%', udp: '50%' };
+        return { tcp: (t / total * 100) + '%', udp: (u / total * 100) + '%' };
+      },
+    },
+    methods: {
+      // --- bento tile helpers -------------------------------------------
+      // 2*pi*r for the r=16 ring in the markup. components.css sets the same
+      // number as stroke-dasharray; both derive from that one radius.
+      ringOffset(pct) {
+        const C = 2 * Math.PI * 16;
+        const p = Math.max(0, Math.min(100, Number(pct) || 0));
+        return C - (C * p / 100);
+      },
+      ringClass(pct) {
+        const p = Number(pct) || 0;
+        if (p >= 90) return 'bo-ring-progress--error';
+        if (p >= 75) return 'bo-ring-progress--warn';
+        return '';
+      },
+      loadBarWidth(load) {
+        // Load average is per-core, so full bar = one fully saturated core set.
+        const cores = Math.max(1, Number(this.status.cpuCores) || 1);
+        const pct = Math.max(0, Math.min(100, (Number(load) || 0) / cores * 100));
+        return pct + '%';
+      },
+      // Maps a daemon state onto the data-state values components.css styles.
+      // Keyed off the raw state, NOT off coreStateColor(): that returns hex
+      // literals rather than palette names, so mapping through it silently
+      // collapsed every service to 'stopped'.
+      coreStateKey(state) {
+        return {
+          running: 'running',
+          idle: 'idle',
+          stopped: 'stopped',
+          error: 'error',
+          not_installed: 'off',
+        }[state] || 'off';
+      },
+      openCore(name) {
+        // The three Xray-served protocols have no card on the Core Settings page
+        // to anchor to - there is nothing to install, start or stop - so their
+        // chips lead where they can actually be acted on instead of to a dead
+        // anchor on a page that has never heard of them.
+        if (['anytls', 'tuic', 'naive'].includes(name)) {
+          location.href = basePath + 'panel/inbounds';
+          return;
+        }
+        location.href = basePath + 'panel/core#' + encodeURIComponent(name);
+      },
+      // Preserves the dot/colon shape so a masked address still reads as an
+      // address rather than a blob.
+      maskIp(ip) {
+        return (ip || '').replace(/[^:.]/g, '•');
+      },
+      // Rate for the selected interface, falling back to the aggregate when
+      // "All" is chosen or the backend has not sent per-NIC counters yet.
+      ifaceRate(dir) {
+        const m = this.status.netIOByIface;
+        if (!this.ifaceFilter || !m) return this.status.netIO[dir];
+        const row = Array.isArray(m)
+          ? m.find(x => x.name === this.ifaceFilter)
+          : m[this.ifaceFilter];
+        return row ? (row[dir] || 0) : this.status.netIO[dir];
+      },
+      onIfaceChange() {
+        // The chart is a rolling window of one series; switching interface
+        // makes the retained points meaningless, so start it over.
+        this.history.up = [];
+        this.history.down = [];
+      },
+      openRenameServer() {
+        promptModal.open({
+          title: '{{ i18n "edit" }}',
+          type: 'text',
+          value: this.serverName || '',
+          okText: '{{ i18n "confirm" }}',
+          confirm: async (name) => {
+            const msg = await HttpUtil.post('/panel/api/server/serverName',
+              { serverName: (name || '').trim() });
+            if (msg && msg.success) this.serverName = (name || '').trim();
+            promptModal.close();
+          },
+        });
+      },
+      // Runs once per overview load. Server-side it is cached for 5 minutes
+      // (failures included), so revisiting the dashboard cannot hammer the
+      // probe. Failure is recorded, not thrown: the row shows the error text.
+      async fetchPanelLocation() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/panelLocation');
+          const o = (msg && msg.obj) || {};
+          this.panelLoc = {
+            checked: true,
+            found: !!o.found,
+            countryCode: o.countryCode || '',
+            ipv4: o.ipv4 || '',
+            ipv6: o.ipv6 || '',
+          };
+        } catch (e) {
+          this.panelLoc = { checked: true, found: false, countryCode: '', ipv4: '', ipv6: '' };
+        }
+      },
+      async fetchServerName() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/serverName');
+          if (msg && msg.success && msg.obj) this.serverName = msg.obj.serverName || '';
+        } catch (e) { /* best-effort */ }
+      },
+      async fetchUserStats() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/userStats');
+          if (msg && msg.success && msg.obj) this.userStats = msg.obj;
+        } catch (e) { /* best-effort */ }
+      },
+      // The modal's row/level/syslog controls and its refresh icon go through
+      // here, so they re-run the loader that opened it instead of always
+      // dropping back to the panel-only view.
+      // quiet=true is the live tail's refresh: same request, but no spinner and
+      // the scroll position is preserved unless the reader is following the end.
+      reloadLogs(quiet) {
+        if (logModal.mode === 'all') return this.openAllLogs(quiet);
+        if (logModal.mode === 'core') return this.openCoreLogs(logModal.coreName, quiet);
+        return this.openLogs(quiet);
+      },
+      // One core's log, the same endpoint and therefore the same content Core
+      // Settings shows for it. Kept separate from openAllLogs so the Xray tile
+      // does not have to fan out to every daemon to answer for one.
+      async openCoreLogs(name, quiet) {
+        if (!name) return;
+        if (!quiet) logModal.loading = true;
+        try {
+          const msg = await HttpUtil.get('/panel/core/logs/' + encodeURIComponent(name));
+          if (!msg || !msg.success) return;
+          LiveLog.keepPinned('#log-modal .log-container',
+            () => logModal.showCore(name, msg.obj || ''));
+        } finally {
+          // In a finally so a failed fetch cannot leave the title spinner
+          // running forever with the modal already open.
+          if (!quiet) logModal.loading = false;
+        }
+      },
+      async openAllLogs(live) {
+        // The Manage tile's log button aggregates the panel log and every
+        // core's log, so a user does not have to open Core Settings once per
+        // daemon.
+        if (!live) {
+          logModal.loading = true;
+          logModal.showSections([]);
+        }
+        const sections = [];
+
+        const panel = await HttpUtil.post('/panel/api/server/logs/' + logModal.rows,
+          { level: logModal.level, syslog: logModal.syslog });
+        if (panel && panel.success) {
+          sections.push({ name: 'VPN-UI', text: (panel.obj || []).join('\n') });
+        }
+
+        // Core logs sit behind PermCoreSettings, which someone looking at
+        // Overview need not hold. These go through axios rather than HttpUtil
+        // because HttpUtil toasts on failure, and a 403 would raise one toast
+        // per core; the panel log on its own is still a useful answer.
+        const get = (url) => axios.get(url).then((r) => r.data).catch(() => null);
+        let cores = live && logModal.coreList ? logModal.coreList : null;
+        if (!cores) {
+          const status = await get('/panel/core/status');
+          cores = (status && status.success && status.obj && status.obj.cores) || [];
+          logModal.coreList = cores;
+        }
+        // A live tail fans out to one request per core, so it skips the cores
+        // explicitly unticked in the filter. A core that has never produced a
+        // line is not in the filter at all and stays polled, so one that only
+        // starts logging now still shows up.
+        if (live && logModal.sources.length) {
+          cores = cores.filter((c) => !logModal.sources.includes(c.name) || logModal.enabled[c.name] !== false);
+        }
+        const logs = await Promise.all(cores.map((c) =>
+          get('/panel/core/logs/' + encodeURIComponent(c.name))
+            .then((d) => ({ name: c.name, text: (d && d.success && d.obj) || '' }))));
+        for (const l of logs) {
+          if (l.text.trim()) sections.push(l);
+        }
+
+        LiveLog.keepPinned('#log-modal .log-container', () => logModal.showSections(sections));
+        logModal.loading = false;
+      },
+      openRestore() {
+        this.openBackup();
+      },
+      pushHistory() {
+        const cap = this.HISTORY_POINTS;
+        const add = (arr, v) => {
+          arr.push(Number(v) || 0);
+          if (arr.length > cap) arr.splice(0, arr.length - cap);
+        };
+        // CPU and memory are percentages, so their charts keep the percent
+        // treatment and a genuinely idle machine correctly draws a flat line.
+        add(this.history.cpu, this.status.cpu.percent);
+        add(this.history.mem, this.status.mem.percent);
+        // Swap and storage plot THROUGHPUT (read+write combined), not usage.
+        // How full a disk is barely moves between two-second polls, so a usage
+        // sparkline there is flat by construction and says nothing; paging and
+        // disk I/O are the signals worth a graph on those two rows.
+        add(this.history.swap, this.swapIoRate);
+        add(this.history.disk, this.diskIoRate);
+        // Through ifaceRate, so the interface picker actually selects a series.
+        // These used to push the aggregate unconditionally: choosing a NIC cleared
+        // the chart and then refilled it with the same all-interfaces numbers, so
+        // the control looked broken and ifaceRate was dead code.
+        add(this.history.up, this.ifaceRate('up'));
+        add(this.history.down, this.ifaceRate('down'));
+      },
+
+      // --- VPN daemon statuses (dashboard card) --------------------------
+      // /panel/core is gated on the Core Settings permission, so an admin or
+      // reseller without it is skipped entirely rather than sent to be refused:
+      // the try/catch below cannot swallow that refusal (HttpUtil resolves a
+      // failed call instead of throwing, and toasts it on the way), so calling
+      // anyway put a permission error on screen at every dashboard load. The
+      // card that consumes this is hidden for the same callers.
+      async getCoreStatuses() {
+        if (!PERMS.accessCoreSettings) return;
+        try {
+          const msg = await HttpUtil.get('/panel/core/status');
+          if (msg && msg.success && msg.obj) this.coreStatuses = msg.obj.cores || [];
+        } catch (e) { /* dashboard card is best-effort */ }
+      },
+      // Announces, once, that the panel came back from an in-panel update. The
+      // server owns the "once": reading /updateResult consumes the record it
+      // wrote just before restarting, so reloading the overview afterwards does
+      // not re-announce, and an ordinary restart has nothing to announce.
+      //
+      // Super-admin only, like updatePanel itself, and raw axios rather than
+      // HttpUtil so a plain admin's overview does not get a permission toast for
+      // asking. Every failure is silent: this is good news or nothing.
+      async announceUpdateResult() {
+        if (!PERMS.manageOverview) return;
+        try {
+          const resp = await axios.get('/panel/api/server/updateResult');
+          const obj = resp && resp.data ? resp.data.obj : null;
+          if (!obj || !obj.updated) return;
+          this.updatedModal.from = obj.from || '';
+          this.updatedModal.to = obj.to || '';
+          this.updatedModal.backup = obj.backupPath || '';
+          this.updatedModal.visible = true;
+        } catch (e) { /* nothing to announce */ }
+      },
+      // --- Panel self-update (VPN-UI card) ------------------------------
+      // Runs automatically on every overview load (manual=false, silent) and on
+      // the "Check for Update" button (manual=true, surfaces errors in the card).
+      async checkForUpdate(manual) {
+        this.panelUpdate.checking = true;
+        this.panelUpdate.error = '';
+        try {
+          // manual check bypasses the 5-min server cache; auto-check on load uses it
+          const url = '/panel/api/server/checkUpdate' + (manual ? '?force=1' : '');
+          const msg = await HttpUtil.get(url);
+          if (msg && msg.success && msg.obj) {
+            this.panelUpdate.available = !!msg.obj.available;
+            this.panelUpdate.latest = msg.obj.latest || '';
+            this.panelUpdate.current = msg.obj.current || '';
+            this.panelUpdate.notes = msg.obj.notes || '';
+            this.panelUpdate.publishedAt = msg.obj.publishedAt || '';
+            this.panelUpdate.url = msg.obj.url || '';
+            // Only a manual check marks "checked" (drives the "Up to date" tag). The
+            // auto-check stays silent when there's no update or the check failed -
+            // an available update still surfaces via the alert below regardless.
+            if (manual) this.panelUpdate.checked = true;
+          } else if (manual) {
+            this.panelUpdate.error = (msg && msg.msg) || 'update check failed';
+          }
+        } catch (e) {
+          if (manual) this.panelUpdate.error = '' + e;
+        } finally {
+          this.panelUpdate.checking = false;
+        }
+      },
+      // Opens the release-notes dialog. No refetch: the notes ride along on the
+      // very check that reported the update, so an empty `notes` means the
+      // release published none, and the dialog says exactly that. Re-checking
+      // here would only add an error toast on a host that cannot reach GitHub,
+      // at the moment the operator asked to install rather than to check.
+      openUpdateModal() {
+        this.updateModal.visible = true;
+      },
+      // Opens the donate dialog, clearing any stale "copied" tick from a prior
+      // visit so the dialog never opens already claiming something was copied.
+      openDonateModal() {
+        this.donateModal.copied = -1;
+        this.donateModal.visible = true;
+      },
+      // ClipboardManager falls back to execCommand, so this works on the plain
+      // HTTP panels navigator.clipboard refuses to serve. The tick is per row
+      // and self-clears; a failed copy says so rather than silently ticking.
+      async copyDonateAddress(index, address) {
+        const ok = await ClipboardManager.copyText(address);
+        if (!ok) {
+          this.donateModal.copied = -1;
+          this.$message.error('{{ i18n "somethingWentWrong" }}');
+          return;
+        }
+        this.donateModal.copied = index;
+        clearTimeout(this.donateCopyTimer);
+        this.donateCopyTimer = setTimeout(() => { this.donateModal.copied = -1; }, 1800);
+      },
+      // The dialog's own OK button. Closes it first so the card's progress bar,
+      // which is what reports the rest of the run, is not hidden behind a mask.
+      confirmPanelUpdate() {
+        this.updateModal.visible = false;
+        this.doPanelUpdate();
+      },
+      // Download + install the latest release and restart the panel. On success the
+      // panel restarts, so we intentionally leave `updating` true (the info alert
+      // tells the user to reload); an error resets it.
+      async doPanelUpdate() {
+        this.panelUpdate.updating = true;
+        this.panelUpdate.cancelling = false;
+        this.panelUpdate.error = '';
+        this.panelUpdate.percent = 0;
+        this.panelUpdate.phase = 'downloading';
+        this.panelUpdate.speed = 0;
+        this.panelUpdate.bytes = 0;
+        this.panelUpdate.total = 0;
+        // Poll the server for live download/install progress while the (blocking)
+        // update request runs. Once it succeeds the panel restarts and these polls
+        // start failing - harmless, they're ignored - until the page reloads.
+        // A terminal phase left over from a previous attempt is ignored: this run
+        // hasn't reached the server yet, so only forward progress is adopted.
+        const poll = setInterval(() => this.readPanelUpdateProgress(), 700);
+        try {
+          const msg = await HttpUtil.post('/panel/api/server/updatePanel');
+          clearInterval(poll);
+          // Cancelled: the user's own doing, so reset quietly rather than red-barring.
+          if (msg && msg.success && msg.obj && msg.obj.cancelled) {
+            this.resetPanelUpdate();
+            return;
+          }
+          if (!msg || !msg.success) {
+            this.panelUpdate.updating = false;
+            this.panelUpdate.cancelling = false;
+            this.panelUpdate.speed = 0;
+            this.panelUpdate.error = (msg && msg.msg) || 'update failed';
+            return;
+          }
+          // Success: the new binary is installed and the panel is restarting. Hold the
+          // bar at 100% "restarting" and reload once it should be back up.
+          this.panelUpdate.phase = 'restarting';
+          this.panelUpdate.percent = 100;
+          this.panelUpdate.speed = 0;
+          setTimeout(() => location.reload(), 9000);
+        } catch (e) {
+          clearInterval(poll);
+          this.panelUpdate.updating = false;
+          this.panelUpdate.cancelling = false;
+          this.panelUpdate.speed = 0;
+          this.panelUpdate.error = '' + e;
+        }
+      },
+      // Asks the server to abort the download. The blocked updatePanel request is what
+      // actually resolves the UI, so this only arms the cancel and waits.
+      async cancelPanelUpdate() {
+        this.panelUpdate.cancelling = true;
+        try {
+          const msg = await HttpUtil.post('/panel/api/server/cancelUpdate');
+          // Refused (already installing): drop the spinner and let it finish.
+          if (!msg || !msg.success) this.panelUpdate.cancelling = false;
+        } catch (e) {
+          this.panelUpdate.cancelling = false;
+        }
+      },
+      // One read of the server's self-update progress into panelUpdate. Returns the
+      // raw object so a caller can decide what a phase change means; returns null
+      // when the panel could not answer (which, mid-update, usually means it is
+      // restarting).
+      async readPanelUpdateProgress() {
+        try {
+          const p = await HttpUtil.get('/panel/api/server/updateProgress');
+          if (!p || !p.success || !p.obj) return null;
+          const phase = p.obj.phase;
+          // error/cancelled are written once by UpdatePanel's deferred block and then
+          // never cleared for the life of the process, so they are not evidence about
+          // THIS run. Only forward progress is adopted.
+          if (phase === 'error' || phase === 'cancelled') return p.obj;
+          if (typeof p.obj.percent === 'number') this.panelUpdate.percent = p.obj.percent;
+          if (phase) this.panelUpdate.phase = phase;
+          if (typeof p.obj.speed === 'number') this.panelUpdate.speed = p.obj.speed;
+          if (typeof p.obj.bytes === 'number') this.panelUpdate.bytes = p.obj.bytes;
+          if (typeof p.obj.total === 'number') this.panelUpdate.total = p.obj.total;
+          return p.obj;
+        } catch (e) {
+          return null; // panel restarting - ignore
+        }
+      },
+      // Re-attach to a self-update that was already running when this page loaded.
+      //
+      // Needed because the thing that normally drives the UI - the blocked POST to
+      // /updatePanel - belongs to a page that no longer exists. The download does not
+      // care: its context is context.Background(), and Gin does not kill a handler
+      // when the browser leaves. So the server keeps pulling the binary while the
+      // overview, rebuilt from scratch, shows an idle tile. `running` is what tells
+      // the two apart; the phase alone cannot, because terminal phases stick.
+      async resumePanelUpdate() {
+        let st = null;
+        try {
+          const p = await HttpUtil.get('/panel/api/server/updateProgress');
+          if (p && p.success && p.obj) st = p.obj;
+        } catch (e) { /* nothing to resume if we cannot ask */ }
+        if (!st || !st.running) return;
+        this.panelUpdate.updating = true;
+        this.panelUpdate.error = '';
+        this.panelUpdate.percent = typeof st.percent === 'number' ? st.percent : 0;
+        this.panelUpdate.phase = st.phase || 'downloading';
+        this.panelUpdate.speed = st.speed || 0;
+        this.panelUpdate.bytes = st.bytes || 0;
+        this.panelUpdate.total = st.total || 0;
+        this.watchPanelUpdate();
+      },
+      // Follows a resumed update to its end. Recursive setTimeout rather than
+      // setInterval so a slow answer cannot stack requests behind a panel that is
+      // busy installing.
+      //
+      // The outcome has to be read off the phase here, because nobody is holding the
+      // request that would otherwise report it: `installing`/`restarting` mean the
+      // swap is armed, so hold the bar and reload once the panel should be back.
+      watchPanelUpdate() {
+        clearTimeout(this.panelUpdateTimer);
+        this.panelUpdateTimer = setTimeout(async () => {
+          const st = await this.readPanelUpdateProgress();
+          if (!st) {
+            // No answer. Mid-restart this is expected and the reload below is already
+            // armed; otherwise keep watching.
+            this.watchPanelUpdate();
+            return;
+          }
+          if (st.phase === 'installing' || st.phase === 'restarting') {
+            this.panelUpdate.phase = st.phase;
+            this.panelUpdate.percent = 100;
+            this.panelUpdate.speed = 0;
+            if (!this.panelUpdateReloadArmed) {
+              this.panelUpdateReloadArmed = true;
+              setTimeout(() => location.reload(), 9000);
+            }
+            return;
+          }
+          if (!st.running) {
+            if (st.phase === 'cancelled') { this.resetPanelUpdate(); return; }
+            if (st.phase === 'error') {
+              this.panelUpdate.updating = false;
+              this.panelUpdate.cancelling = false;
+              this.panelUpdate.speed = 0;
+              this.panelUpdate.error = '{{ i18n "pages.index.updateFailed" }}';
+              return;
+            }
+            if (st.phase === 'staged') return; // waiting on the operator to apply it
+            this.resetPanelUpdate();
+            return;
+          }
+          this.watchPanelUpdate();
+        }, 700);
+      },
+      resetPanelUpdate() {
+        clearTimeout(this.panelUpdateTimer);
+        this.panelUpdateReloadArmed = false;
+        this.panelUpdate.updating = false;
+        this.panelUpdate.cancelling = false;
+        this.panelUpdate.error = '';
+        this.panelUpdate.percent = 0;
+        this.panelUpdate.phase = '';
+        this.panelUpdate.speed = 0;
+        this.panelUpdate.bytes = 0;
+        this.panelUpdate.total = 0;
+      },
+      // --- manual update: which source ----------------------------------
+      // The picker closes on the way through rather than staying behind whatever it
+      // opened: both destinations are themselves dialogs, and the second mask over
+      // the first dims the progress bar in the tile that both flows write to.
+      //
+      // The file chooser is opened synchronously from this click so it still counts
+      // as the user gesture that permits it; deferring it past the modal's close
+      // animation is what gets it suppressed.
+      chooseManualUpdate(source) {
+        this.manualModal.visible = false;
+        if (source === 'url') {
+          this.openPanelUrlModal();
+          return;
+        }
+        this.pickPanelBinary();
+      },
+      // --- manual update: from a URL the SERVER downloads ---------------
+      openPanelUrlModal() {
+        this.urlModal.url = '';
+        this.urlModal.fetching = false;
+        this.urlModal.visible = true;
+      },
+      // Download and INSPECT. Installs nothing: the answer is the pair of versions the
+      // confirmation is built on, exactly as the upload path produces them.
+      //
+      // The dialog stays open on failure. A rejected URL is nearly always a typo or a
+      // page-instead-of-file link, and the fix is to edit what was just typed rather
+      // than to reopen an empty box and start again.
+      async fetchPanelBinaryFromUrl() {
+        const url = (this.urlModal.url || '').trim();
+        if (!url || this.urlModal.fetching) return;
+        this.urlModal.fetching = true;
+        this.panelUpdate.updating = true;
+        this.panelUpdate.cancelling = false;
+        this.panelUpdate.error = '';
+        this.panelUpdate.percent = 0;
+        this.panelUpdate.phase = 'downloading';
+        this.panelUpdate.speed = 0;
+        this.panelUpdate.bytes = 0;
+        this.panelUpdate.total = 0;
+        // The transfer is the panel's, not the browser's, so progress has to be
+        // polled rather than measured here the way the upload measures itself. Same
+        // poll the GitHub updater uses, and the same reason for ignoring a terminal
+        // phase: it belongs to an attempt that is already over.
+        const poll = setInterval(async () => {
+          try {
+            const p = await HttpUtil.get('/panel/api/server/updateProgress');
+            if (p && p.success && p.obj) {
+              const phase = p.obj.phase;
+              if (phase === 'error' || phase === 'cancelled') return;
+              if (typeof p.obj.percent === 'number') this.panelUpdate.percent = p.obj.percent;
+              if (phase) this.panelUpdate.phase = phase;
+              if (typeof p.obj.speed === 'number') this.panelUpdate.speed = p.obj.speed;
+              if (typeof p.obj.bytes === 'number') this.panelUpdate.bytes = p.obj.bytes;
+              if (typeof p.obj.total === 'number') this.panelUpdate.total = p.obj.total;
+            }
+          } catch (e) { /* ignore a poll that raced the fetch */ }
+        }, 700);
+        // Raw axios: a failed fetch is reported once, next to the field being fixed,
+        // rather than as a toast on top of a dialog that is still open.
+        try {
+          const res = await axios.post('/panel/api/server/fetchPanelBinary', { url });
+          clearInterval(poll);
+          const msg = res && res.data;
+          this.urlModal.fetching = false;
+          if (!msg || !msg.success) {
+            this.resetPanelUpdate();
+            this.$message.error((msg && msg.msg) || 'download failed');
+            return;
+          }
+          this.urlModal.visible = false;
+          this.uploadModal.source = 'url';
+          this.uploadModal.info = msg.obj || { token: '', current: '', new: '', direction: '' };
+          this.uploadModal.typed = '';
+          this.uploadModal.visible = true;
+          // The bar stays up behind the dialog: the file IS on the server now, and
+          // backing out is what removes it again.
+          this.panelUpdate.percent = 100;
+          this.panelUpdate.speed = 0;
+          this.panelUpdate.phase = 'staged';
+        } catch (e) {
+          clearInterval(poll);
+          this.urlModal.fetching = false;
+          this.resetPanelUpdate();
+          this.$message.error('' + e);
+        }
+      },
+      // --- manual update: from a local file -----------------------------
+      pickPanelBinary() {
+        const el = this.$refs.panelBinaryInput;
+        if (!el) return;
+        // Cleared first so choosing the SAME file twice still fires change: the
+        // second pick of an identical value is not a change event otherwise, and the
+        // button would look dead after a failed upload.
+        el.value = '';
+        el.click();
+      },
+      async onPanelBinaryPicked(e) {
+        const file = e && e.target && e.target.files && e.target.files[0];
+        if (!file) return;
+        await this.uploadPanelBinary(file);
+      },
+      // Upload and INSPECT. Nothing is installed here: the answer is the pair of
+      // versions the confirmation is built on.
+      async uploadPanelBinary(file) {
+        // Set every time, not just left at its initial value: the URL flow moves it
+        // to 'url' and never moves it back, so a file picked after a URL attempt in
+        // the same page would open a confirmation titled "Update from URL".
+        this.uploadModal.source = 'file';
+        this.panelUpdate.updating = true;
+        this.panelUpdate.cancelling = false;
+        this.panelUpdate.error = '';
+        this.panelUpdate.percent = 0;
+        this.panelUpdate.phase = 'uploading';
+        this.panelUpdate.speed = 0;
+        this.panelUpdate.bytes = 0;
+        this.panelUpdate.total = file.size || 0;
+
+        const body = new FormData();
+        // Field name must match what the handler streams: it walks the parts and takes
+        // the one called "binary".
+        body.append('binary', file);
+        // Speed is measured here rather than server-side: the browser is the end that
+        // knows how many bytes it has actually put on the wire. Smoothed the way the
+        // server smooths its download rate (see progressReader.sampleSpeed: 500ms
+        // samples, EMA alpha 0.3), because raw per-event deltas swing between zero and
+        // multiples of the true rate and are unreadable.
+        let lastAt = Date.now();
+        let lastLoaded = 0;
+        try {
+          const res = await axios.post('/panel/api/server/uploadPanelBinary', body, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            onUploadProgress: (p) => {
+              const total = p.total || file.size || 0;
+              this.panelUpdate.bytes = p.loaded;
+              this.panelUpdate.total = total;
+              this.panelUpdate.percent = total ? Math.min(99, Math.floor(p.loaded * 99 / total)) : 0;
+              // The bytes are flushed but the server is still checking the file, which
+              // takes a moment on a 300MB upload it has to exec. Still saying
+              // "uploading" through that reads as a stall.
+              if (total && p.loaded >= total) {
+                this.panelUpdate.phase = 'checking';
+                this.panelUpdate.speed = 0;
+                return;
+              }
+              const now = Date.now();
+              const dt = (now - lastAt) / 1000;
+              if (dt >= 0.5) {
+                const bps = (p.loaded - lastLoaded) / dt;
+                this.panelUpdate.speed = this.panelUpdate.speed > 0
+                  ? 0.3 * bps + 0.7 * this.panelUpdate.speed
+                  : bps;
+                lastAt = now;
+                lastLoaded = p.loaded;
+              }
+            },
+          });
+          const msg = res && res.data;
+          if (!msg || !msg.success) {
+            // resetPanelUpdate clears `error`, so the reason is set after it.
+            this.resetPanelUpdate();
+            this.panelUpdate.error = (msg && msg.msg) || 'upload failed';
+            return;
+          }
+          this.uploadModal.info = msg.obj || { token: '', current: '', new: '', direction: '' };
+          this.uploadModal.typed = '';
+          this.uploadModal.visible = true;
+          // The bar stays up behind the dialog: the file IS on the server now, and
+          // backing out is what removes it again.
+          this.panelUpdate.percent = 100;
+          this.panelUpdate.speed = 0;
+          this.panelUpdate.phase = 'staged';
+        } catch (err) {
+          this.resetPanelUpdate();
+          this.panelUpdate.error = '' + err;
+        }
+      },
+      // Backing out deletes the staged file rather than leaving a stranger's binary
+      // sitting next to the running one.
+      async cancelPanelUpload() {
+        this.uploadModal.visible = false;
+        this.uploadModal.typed = '';
+        this.resetPanelUpdate();
+        try { await HttpUtil.post('/panel/api/server/discardPanelBinary'); } catch (e) { /* nothing staged */ }
+      },
+      confirmPanelUpload() {
+        if (!this.uploadOkArmed) return;
+        // Second confirmation, and only for a downgrade. The first was typing the
+        // version out; this one states the consequence in one line.
+        if (this.uploadModal.info.direction === 'downgrade') {
+          const to = this.uploadModal.info.new;
+          const from = this.uploadModal.info.current;
+          this.$confirm({
+            title: '{{ i18n "pages.index.updateDowngradeTitle" }}',
+            content: '{{ i18n "pages.index.updateDowngradeFinal" }}'
+              .replace('%FROM%', 'v' + from).replace('%TO%', 'v' + to),
+            okText: '{{ i18n "pages.index.updateDowngradeNow" }}',
+            okType: 'danger',
+            cancelText: '{{ i18n "cancel" }}',
+            class: themeSwitcher.currentTheme,
+            onOk: () => { this.uploadModal.visible = false; this.applyPanelBinary(); },
+          });
+          return;
+        }
+        this.uploadModal.visible = false;
+        this.applyPanelBinary();
+      },
+      // Install the staged binary. From here it is the download updater's ending:
+      // same swap, same rollback copy, same restart, so the same "restarting" hold
+      // and page reload apply.
+      async applyPanelBinary() {
+        this.panelUpdate.updating = true;
+        this.panelUpdate.phase = 'installing';
+        this.panelUpdate.percent = 99;
+        this.panelUpdate.speed = 0;
+        try {
+          // The token names the exact file inspection measured, so this can only
+          // install the binary the confirmation was actually about.
+          const msg = await HttpUtil.post('/panel/api/server/applyPanelBinary',
+            { token: this.uploadModal.info.token || '' });
+          if (!msg || !msg.success) {
+            this.resetPanelUpdate();
+            this.panelUpdate.error = (msg && msg.msg) || 'update failed';
+            return;
+          }
+          this.panelUpdate.phase = 'restarting';
+          this.panelUpdate.percent = 100;
+          setTimeout(() => location.reload(), 9000);
+        } catch (e) {
+          this.resetPanelUpdate();
+          this.panelUpdate.error = '' + e;
+        }
+      },
+      // Download rate, shown only while bytes are actually moving.
+      panelUpdateSpeedText() {
+        if (!this.panelUpdate.speed) return '';
+        if (this.panelUpdate.phase !== 'downloading' && this.panelUpdate.phase !== 'uploading') return '';
+        return SizeFormatter.sizeFormat(this.panelUpdate.speed) + '/s';
+      },
+      panelUpdatePhaseText() {
+        const map = {
+          uploading: '{{ i18n "pages.index.updateUploading" }}',
+          checking: '{{ i18n "pages.index.updateChecking" }}',
+          staged: '{{ i18n "pages.index.updateStaged" }}',
+          downloading: '{{ i18n "pages.index.updateDownloading" }}',
+          installing: '{{ i18n "pages.index.updateInstalling" }}',
+          restarting: '{{ i18n "pages.index.updateRestarting" }}',
+        };
+        return map[this.panelUpdate.phase] || '{{ i18n "pages.index.updateStarted" }}';
+      },
+      // --- Unsupported-distro warning (dashboard modal) -----------------
+      async checkDistroSupport() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/distroStatus');
+          if (!msg || !msg.success || !msg.obj) return;
+          // The identity tile shows the distro name whether or not it is a
+          // supported one, so capture it before the supported-case early return.
+          this.distroPretty = msg.obj.pretty || '';
+          if (msg.obj.supported) return;
+          // "don't show again" is keyed by the distro name, so moving to a
+          // different unsupported distro warns again.
+          if (localStorage.getItem('vpnui.distroWarnDismissed') === msg.obj.pretty) return;
+          this.distroModal.pretty = msg.obj.pretty || 'This system';
+          this.distroModal.tested = msg.obj.tested || '';
+          this.distroModal.visible = true;
+        } catch (e) { /* best-effort - never block the dashboard */ }
+      },
+      dismissDistroWarning(forever) {
+        if (forever) {
+          try { localStorage.setItem('vpnui.distroWarnDismissed', this.distroModal.pretty); } catch (e) { /* ignore */ }
+        }
+        this.distroModal.visible = false;
+      },
+      // The banner's own X is a session dismiss and needs no handler; this is
+      // the permanent one, and it silences the banner on every page.
+      dismissSecAlert() {
+        SecAlertDismissal.dismiss();
+        this.showAlert = false;
+      },
+      // Xray leads because everything below it routes through it, and the three
+      // protocols it serves directly follow it. Those three have no daemon and no
+      // core of their own - one Xray process serves all of them - so they are
+      // derived here from its status rather than fetched, which is also why the
+      // Core Settings page does not grow start/stop cards for them.
+      vpnCoreStatuses() {
+        const order = ['xray', 'l2tp', 'ipsec', 'pptp', 'openvpn', 'openconnect', 'sstp', 'ikev2', 'wgc', 'awg', 'gre', 'mtproto', 'ssh', 'radius'];
+        const byName = {};
+        (this.coreStatuses || []).forEach(c => { byName[c.name] = c; });
+        const rows = order.map(n => byName[n] || { name: n, state: 'unknown' });
+        const xray = byName['xray'];
+        const counts = (xray && xray.extra && xray.extra.protocolInbounds) || {};
+        // Inserted right after Xray, not appended: they read as what they are, a
+        // group served by the core above them.
+        const served = ['anytls', 'tuic', 'naive'].map(p => ({
+          name: p,
+          // Idle means "available, nothing configured" everywhere else on this
+          // card, and that is exactly the state a protocol with no inbound is in.
+          // With inbounds it can only be as healthy as the core serving it.
+          state: !Number(counts[p]) ? 'idle' : (xray ? xray.state : 'unknown'),
+          inbounds: Number(counts[p]) || 0,
+        }));
+        rows.splice(1, 0, ...served);
+        return rows;
+      },
+      coreLabel(name) {
+        return { xray: 'Xray', anytls: 'AnyTLS', tuic: 'TUIC', naive: 'NaiveProxy', l2tp: 'L2TP', ipsec: 'IPsec', pptp: 'PPTP', openvpn: 'OpenVPN', openconnect: 'OpenConnect (cisco)', sstp: 'SSTP', ikev2: 'IKEv2', wgc: 'WireGuard (C)', awg: 'AmneziaWG', gre: 'GRE', mtproto: 'MTProto Proxy', ssh: 'SSH', radius: 'RADIUS' }[name] || name;
+      },
+      coreStateColor(state) {
+        return { running: '#52c41a', idle: '#1890ff', stopped: '#faad14', not_installed: '#8c8c8c', error: '#f5222d' }[state] || '#8c8c8c';
+      },
+      coreStateText(state) {
+        return { running: 'Running', idle: 'Idle', stopped: 'Stopped', not_installed: 'Not installed', error: 'Error', unknown: '-' }[state] || state;
+      },
+      openGeofiles() {
+        this.geofilesModal.visible = true;
+        this.loadCustomGeo();
+        this.fetchGeofileStatus();
+        // Re-attach to a download already in flight. Opening the dialog is the most
+        // likely moment for that: the operator started one, went to look at their
+        // inbounds while it ran, and came back.
+        this.geofileRunPoll();
+      },
+      // One poll of the server's geofile job, rescheduling itself while the job is
+      // live. Recursive setTimeout rather than setInterval, matching pollSsl in
+      // settings.html: an interval keeps firing while a slow response is still in
+      // flight and stacks requests behind a panel that is busy restarting Xray.
+      async geofileRunPoll() {
+        clearTimeout(this.geofileRunTimer);
+        // One chain at a time. Without this a call made while an earlier one is still
+        // awaiting its response leaves the earlier one to schedule a timer of its own
+        // after the clearTimeout above has already run, and the two chains then poll
+        // in parallel. openGeofiles and mounted can both land inside the same tick.
+        const seq = ++this.geofileRunSeq;
+        let st = null;
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/geofileProgress');
+          if (msg && msg.success && msg.obj) st = msg.obj;
+        } catch (e) { /* panel busy or restarting - try again on the next tick */ }
+        if (seq !== this.geofileRunSeq) return; // superseded while we waited
+        // While our own POST is still outstanding the server may not have claimed the
+        // run yet, and what it reports is the PREVIOUS run's terminal state. Adopting
+        // that would flash "done" over a download that has not started and stop the
+        // poll before it ever sees one, so only forward progress is taken.
+        if (st && (!this.geofileRunPosting || st.running)) {
+          const wasRunning = this.geofileRun.running;
+          this.geofileRun = st;
+          // The run ended while we were watching: the badges are stale now, because a
+          // download is the one thing that flips a row to installed.
+          if (wasRunning && !st.running) this.fetchGeofileStatus();
+        }
+        if (this.geofileRunPosting || !st || st.running) {
+          this.geofileRunTimer = setTimeout(() => this.geofileRunPoll(), 900);
+        }
+      },
+      // The label under the progress bar: which file is moving right now, or how the
+      // finished run went.
+      geofileRunText() {
+        const r = this.geofileRun;
+        if (r.running) {
+          const done = (r.fetched || []).length;
+          const total = (r.files || []).length;
+          const of = total > 1 ? ' (' + (done + 1) + '/' + total + ')' : '';
+          if (r.current) return r.current + of;
+          // No current file: either nothing has started yet, or every file is in and
+          // what is left is the Xray restart UpdateGeofile ends with.
+          return total && done >= total
+            ? '{{ i18n "pages.index.geofileRestarting" }}'
+            : '{{ i18n "pages.index.geofileRunStarting" }}';
+        }
+        if (r.failed) return r.summary || '{{ i18n "pages.index.geofileRunFailed" }}';
+        return '{{ i18n "pages.index.geofileRunDone" }}';
+      },
+      geofileRunPercent() {
+        const r = this.geofileRun;
+        const total = (r.files || []).length;
+        if (!total) return 0;
+        return Math.round(((r.fetched || []).length / total) * 100);
+      },
+      async toggleGeofileAutoUpdate(checked) {
+        const previous = this.geofileAutoUpdate;
+        // Optimistic, then rolled back on refusal: the switch is the only feedback
+        // there is, so it must not sit on the old value while the request is in
+        // flight and then jump.
+        this.geofileAutoUpdate = checked;
+        this.geofileAutoUpdateSaving = true;
+        try {
+          const msg = await HttpUtil.post('/panel/api/server/geofileAutoUpdate', { enabled: checked });
+          if (!msg || !msg.success) this.geofileAutoUpdate = previous;
+        } catch (e) {
+          this.geofileAutoUpdate = previous;
+        }
+        this.geofileAutoUpdateSaving = false;
+      },
+      async fetchGeofileStatus() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/geofileStatus');
+          if (!msg || !msg.success || !msg.obj) return;
+          this.geofileStatus = msg.obj;
+        } catch (e) { /* best-effort: the list still works without the badges */ }
+      },
+      geofileStateText(file) {
+        const state = this.geofileStatusByName[file];
+        if (!state) return '';
+        const size = state.installed && state.size ? ' (' + SizeFormatter.sizeFormat(state.size) + ')' : '';
+        return (state.installed ? this.geofileText.installed : this.geofileText.notInstalled) + size;
+      },
+      loading(spinning, tip = '{{ i18n "loading"}}') {
+        this.loadingStates.spinning = spinning;
+        this.loadingTip = tip;
+      },
+      async getStatus() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/server/status');
+          if (msg.success) {
+            if (!this.loadingStates.fetched) {
+              this.loadingStates.fetched = true;
+            }
+
+            this.setStatus(msg.obj, true);
+          }
+        } catch (e) {
+          console.error("Failed to get status:", e);
+        }
+      },
+      setStatus(data) {
+        this.status = new Status(data);
+        // Feed the bento vitals sparklines and throughput chart. Runs off the
+        // same push that already updates the page, so it costs no extra request.
+        this.pushHistory();
+        // Push CPU percent into history (clamped 0..100)
+        const v = Math.max(0, Math.min(100, Number(data?.cpu ?? 0)))
+        this.cpuHistory.push(v)
+        const maxPoints = this.isMobile ? 60 : 120
+        if (this.cpuHistory.length > maxPoints) {
+          this.cpuHistory.splice(0, this.cpuHistory.length - maxPoints)
+        }
+        // If modal open, refresh current bucketed data
+        if (this.cpuHistoryModal.visible) {
+          this.fetchCpuHistoryBucket()
+        }
+      },
+      openCpuHistory() {
+        this.cpuHistoryModal.visible = true
+        this.fetchCpuHistoryBucket()
+      },
+      async fetchCpuHistoryBucket() {
+        const bucket = this.cpuHistoryModal.bucket || 2
+        try {
+          const msg = await HttpUtil.get(`/panel/api/server/cpuHistory/${bucket}`)
+          if (msg.success && Array.isArray(msg.obj)) {
+            const vals = []
+            const labels = []
+            for (const p of msg.obj) {
+              const d = new Date(p.t * 1000)
+              const hh = String(d.getHours()).padStart(2,'0')
+              const mm = String(d.getMinutes()).padStart(2,'0')
+              const ss = String(d.getSeconds()).padStart(2,'0')
+              labels.push(bucket>=60 ? `${hh}:${mm}` : `${hh}:${mm}:${ss}`)
+              vals.push(Math.max(0, Math.min(100, p.cpu)))
+            }
+            this.cpuHistoryLabels = labels
+            this.cpuHistoryLong = vals
+          }
+        } catch(e) {
+          console.error('Failed to fetch bucketed cpu history', e)
+        }
+      },
+      openSelectV2rayVersion() {
+        // The Xray core is a pinned, patched build bundled into the panel binary
+        // (see the corebundle package + the locked ServerService.UpdateXray).
+        // Switching/updating the core version is disabled by design, so the
+        // version picker is replaced with a notice. The tag still shows the
+        // running core version.
+        this.$info({
+          title: '{{ i18n "pages.index.xrayCoreLockedTitle" }}',
+          content: '{{ i18n "pages.index.xrayCoreLocked" }}',
+          okText: '{{ i18n "confirm" }}',
+          class: themeSwitcher.currentTheme,
+        });
+      },
+      customGeoFormatTime(ts) {
+        if (!ts) return '';
+        return typeof moment !== 'undefined' ? moment(ts * 1000).format('YYYY-MM-DD HH:mm') : String(ts);
+      },
+      customGeoExtDisplay(record) {
+        const fn = record.type === 'geoip'
+          ? `geoip_${record.alias}.dat`
+          : `geosite_${record.alias}.dat`;
+        return `ext:${fn}:tag`;
+      },
+      async loadCustomGeo() {
+        this.customGeoLoading = true;
+        try {
+          const msg = await HttpUtil.get('/panel/api/custom-geo/list');
+          if (msg.success && Array.isArray(msg.obj)) {
+            this.customGeoList = msg.obj;
+          }
+        } finally {
+          this.customGeoLoading = false;
+        }
+      },
+      openCustomGeoModal(record) {
+        if (record) {
+          this.customGeoModal.editId = record.id;
+          this.customGeoModal.form = {
+            type: record.type,
+            alias: record.alias,
+            url: record.url,
+          };
+        } else {
+          this.customGeoModal.editId = null;
+          this.customGeoModal.form = {
+            type: 'geosite',
+            alias: '',
+            url: '',
+          };
+        }
+        this.customGeoModal.visible = true;
+      },
+      validateCustomGeoForm() {
+        const f = this.customGeoModal.form;
+        const re = /^[a-z0-9_-]+$/;
+        if (!re.test(f.alias || '')) {
+          this.$message.error(this.customGeoValidation.alias);
+          return false;
+        }
+        const u = (f.url || '').trim();
+        if (!/^https?:\/\//i.test(u)) {
+          this.$message.error(this.customGeoValidation.url);
+          return false;
+        }
+        try {
+          const parsed = new URL(u);
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            this.$message.error(this.customGeoValidation.url);
+            return false;
+          }
+        } catch (e) {
+          this.$message.error(this.customGeoValidation.url);
+          return false;
+        }
+        return true;
+      },
+      async submitCustomGeo() {
+        if (!this.validateCustomGeoForm()) {
+          return;
+        }
+        const f = this.customGeoModal.form;
+        this.customGeoModal.saving = true;
+        try {
+          let msg;
+          if (this.customGeoModal.editId) {
+            msg = await HttpUtil.post(`/panel/api/custom-geo/update/${this.customGeoModal.editId}`, f);
+          } else {
+            msg = await HttpUtil.post('/panel/api/custom-geo/add', f);
+          }
+          if (msg && msg.success) {
+            this.customGeoModal.visible = false;
+            await this.loadCustomGeo();
+          }
+        } finally {
+          this.customGeoModal.saving = false;
+        }
+      },
+      confirmDeleteCustomGeo(record) {
+        this.$confirm({
+          title: '{{ i18n "pages.index.customGeoDelete" }}',
+          content: '{{ i18n "pages.index.customGeoDeleteConfirm" }}',
+          okText: '{{ i18n "confirm"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          class: themeSwitcher.currentTheme,
+          onOk: async () => {
+            const msg = await HttpUtil.post(`/panel/api/custom-geo/delete/${record.id}`);
+            if (msg.success) {
+              await this.loadCustomGeo();
+            }
+          },
+        });
+      },
+      async downloadCustomGeo(id) {
+        this.customGeoActionId = id;
+        try {
+          const msg = await HttpUtil.post(`/panel/api/custom-geo/download/${id}`);
+          if (msg.success) {
+            await this.loadCustomGeo();
+          }
+        } finally {
+          this.customGeoActionId = null;
+        }
+      },
+      async updateAllCustomGeo() {
+        this.customGeoUpdatingAll = true;
+        try {
+          const msg = await HttpUtil.post('/panel/api/custom-geo/update-all');
+          if (msg.success || (msg.obj && Array.isArray(msg.obj.succeeded) && msg.obj.succeeded.length > 0)) {
+            await this.loadCustomGeo();
+          }
+        } finally {
+          this.customGeoUpdatingAll = false;
+        }
+      },
+      switchV2rayVersion(version) {
+        this.$confirm({
+          title: '{{ i18n "pages.index.xraySwitchVersionDialog"}}',
+          content: '{{ i18n "pages.index.xraySwitchVersionDialogDesc"}}'.replace('#version#', version),
+          okText: '{{ i18n "confirm"}}',
+          class: themeSwitcher.currentTheme,
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            versionModal.hide();
+            this.loading(true, '{{ i18n "pages.index.dontRefresh"}}');
+            await HttpUtil.post(`/panel/api/server/installXray/${version}`);
+            this.loading(false);
+          },
+        });
+      },
+      updateGeofile(fileName) {
+        const isSingleFile = !!fileName;
+        this.$confirm({
+          title: '{{ i18n "pages.index.geofileUpdateDialog" }}',
+          content: isSingleFile
+            ? '{{ i18n "pages.index.geofileUpdateDialogDesc" }}'.replace("#filename#", fileName)
+            : '{{ i18n "pages.index.geofilesUpdateDialogDesc" }}',
+          okText: '{{ i18n "confirm"}}',
+          class: themeSwitcher.currentTheme,
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            // The dialog STAYS OPEN and the full-page spinner is gone. The transfer
+            // runs server-side and outlives this request, so freezing the whole panel
+            // behind it bought nothing - and it was what made leaving the page look
+            // like the update had been cancelled. Progress now comes from the server,
+            // which means it is still there when the operator comes back.
+            this.geofileRun = {
+              running: true, done: false, current: fileName,
+              files: isSingleFile ? [fileName] : [], fetched: [], failed: false, summary: '',
+            };
+            this.geofileRunPosting = true;
+            this.geofileRunPoll();
+            const url = isSingleFile
+              ? `/panel/api/server/updateGeofile/${fileName}`
+              : `/panel/api/server/updateGeofile`;
+            try {
+              await HttpUtil.post(url);
+            } catch (e) { /* the poll below reports how it actually went */ }
+            this.geofileRunPosting = false;
+            await this.geofileRunPoll();
+            // A download is the one thing that flips a row from not-installed to
+            // installed, so re-read rather than leaving the badges stale.
+            await this.fetchGeofileStatus();
+          },
+        });
+      },
+      async stopXrayService() {
+        this.loading(true);
+        const msg = await HttpUtil.post('/panel/api/server/stopXrayService');
+        this.loading(false);
+        if (!msg.success) {
+          return;
+        }
+      },
+      async restartXrayService() {
+        this.loading(true);
+        const msg = await HttpUtil.post('/panel/api/server/restartXrayService');
+        this.loading(false);
+        if (!msg.success) {
+          return;
+        }
+      },
+      // The spinner reset sits in a finally in both of these: an early return on a
+      // failed fetch used to leave the title spinner turning forever.
+      async openLogs(quiet) {
+        if (!quiet) logModal.loading = true;
+        try {
+          const msg = await HttpUtil.post('/panel/api/server/logs/' + logModal.rows, { level: logModal.level, syslog: logModal.syslog });
+          if (!msg.success) {
+            return;
+          }
+          LiveLog.keepPinned('#log-modal .log-container', () => logModal.show(msg.obj));
+          if (!quiet) await PromiseUtil.sleep(500);
+        } finally {
+          if (!quiet) logModal.loading = false;
+        }
+      },
+      async openXrayLogs(quiet) {
+        if (!quiet) xraylogModal.loading = true;
+        try {
+          const msg = await HttpUtil.post('/panel/api/server/xraylogs/' + xraylogModal.rows, { filter: xraylogModal.filter, showDirect: xraylogModal.showDirect, showBlocked: xraylogModal.showBlocked, showProxy: xraylogModal.showProxy });
+          if (!msg.success) {
+            return;
+          }
+          LiveLog.keepPinned('#xraylog-modal .log-container', () => xraylogModal.show(msg.obj));
+          if (!quiet) await PromiseUtil.sleep(500);
+        } finally {
+          if (!quiet) xraylogModal.loading = false;
+        }
+      },
+      downloadXrayLogs() {
+        if (!Array.isArray(this.xraylogModal.logs) || this.xraylogModal.logs.length === 0) {
+          FileManager.downloadTextFile('', 'vpn-ui.log');
+          return;
+        }
+        const lines = this.xraylogModal.logs.map(l => {
+          try {
+            const dt = l.DateTime ? new Date(l.DateTime) : null;
+            const dateStr = dt && !isNaN(dt.getTime()) ? dt.toISOString() : '';
+            const eventMap = { 0: 'DIRECT', 1: 'BLOCKED', 2: 'PROXY' };
+            const eventText = eventMap[l.Event] || String(l.Event ?? '');
+            const emailPart = l.Email ? ` Email=${l.Email}` : '';
+            return `${dateStr} FROM=${l.FromAddress || ''} TO=${l.ToAddress || ''} INBOUND=${l.Inbound || ''} OUTBOUND=${l.Outbound || ''}${emailPart} EVENT=${eventText}`.trim();
+          } catch (e) {
+            return JSON.stringify(l);
+          }
+        }).join('\n');
+        FileManager.downloadTextFile(lines, 'vpn-ui.log');
+      },
+      async openConfig() {
+        this.loading(true);
+        const msg = await HttpUtil.get('/panel/api/server/getConfigJson');
+        this.loading(false);
+        if (!msg.success) {
+          return;
+        }
+        txtModal.show('config.json', JSON.stringify(msg.obj, null, 2), 'config.json');
+      },
+      openBackup() {
+        backupModal.show();
+      },
+      openBackupName() {
+        backupNameModal.show();
+      },
+      // Navigation, not an XHR: the response is a file the browser saves itself,
+      // and its name comes from the server's Content-Disposition. That is why the
+      // ticks travel as query params instead of a request body.
+      //
+      // All four are always sent, unticked ones included as false. An absent flag
+      // means "no picker was involved" server-side, so omitting the false ones
+      // would silently turn all-unticked back into the default dated name.
+      exportDatabase() {
+        backupNameModal.hide();
+        const query = BACKUP_NAME_ORDER
+          .map(part => part + '=' + (backupNameModal.parts.includes(part) ? 'true' : 'false'))
+          .join('&');
+        window.location = basePath + 'panel/api/server/getDb?' + query;
+      },
+      importDatabase() {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.db';
+        fileInput.addEventListener('change', async (event) => {
+          const dbFile = event.target.files[0];
+          if (dbFile) {
+            const formData = new FormData();
+            formData.append('db', dbFile);
+            backupModal.hide();
+            this.loading(true);
+            const uploadMsg = await HttpUtil.post('/panel/api/server/importDB', formData, {
+              headers: {
+                'Content-Type': 'multipart/form-data',
+              }
+            });
+            this.loading(false);
+            if (!uploadMsg.success) {
+              return;
+            }
+            this.loading(true);
+            const restartMsg = await HttpUtil.post("/panel/setting/restartPanel");
+            this.loading(false);
+            if (restartMsg.success) {
+              this.loading(true);
+              await PromiseUtil.sleep(5000);
+              location.reload();
+            }
+          }
+        });
+        fileInput.click();
+      },
+      // Import a stock 3x-ui (or vpn-ui) backup over the current data, keeping this
+      // panel's own address/cert/secret. Distinct from importDatabase (a like-for-like
+      // restore): the admin accounts come from the backup, so the operator re-logs-in
+      // with the imported panel's credentials afterwards.
+      importForeignDatabase() {
+        this.$confirm({
+          title: '{{ i18n "pages.index.importForeignTitle" }}',
+          content: '{{ i18n "pages.index.importForeignConfirm" }}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "confirm" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.db';
+            fileInput.addEventListener('change', async (event) => {
+              const dbFile = event.target.files[0];
+              if (!dbFile) return;
+              const formData = new FormData();
+              formData.append('db', dbFile);
+              backupModal.hide();
+              this.loading(true);
+              const uploadMsg = await HttpUtil.post('/panel/api/server/importForeignDB', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+              });
+              this.loading(false);
+              if (!uploadMsg.success) return;
+              const r = uploadMsg.obj || {};
+              this.$message.success('{{ i18n "pages.index.importDatabaseSuccess" }} (' +
+                (r.inbounds || 0) + ' / ' + (r.clients || 0) + ' / ' + (r.admins || 0) + ')');
+              this.loading(true);
+              const restartMsg = await HttpUtil.post("/panel/setting/restartPanel");
+              this.loading(false);
+              if (restartMsg.success) {
+                this.loading(true);
+                await PromiseUtil.sleep(5000);
+                location.reload();
+              }
+            });
+            fileInput.click();
+          },
+        });
+      },
+      startPolling() {
+        // Fallback polling mechanism
+        const pollInterval = setInterval(async () => {
+          if (window.wsClient && window.wsClient.isConnected) {
+            clearInterval(pollInterval);
+            return;
+          }
+          try {
+            await this.getStatus();
+            await this.getCoreStatuses();
+          } catch (e) {
+            console.error(e);
+          }
+        }, 2000);
+      },
+    },
+    async mounted() {
+      if (window.location.protocol !== "https:" && !SecAlertDismissal.isDismissed()) {
+        this.showAlert = true;
+      }
+
+      const msg = await HttpUtil.post('/panel/setting/defaultSettings');
+      if (msg.success) {
+        this.ipLimitEnable = msg.obj.ipLimitEnable;
+        this.xrayAccessLogEnable = !!msg.obj.xrayAccessLogEnable;
+        if (typeof msg.obj.geofileAutoUpdate === 'boolean') {
+          this.geofileAutoUpdate = msg.obj.geofileAutoUpdate;
+        }
+      }
+
+      // Initial status fetch
+      await this.getStatus();
+      await this.getCoreStatuses();
+      this.checkDistroSupport();
+      this.fetchUserStats();
+      this.fetchServerName();
+      this.fetchPanelLocation();
+      // Up front, not only in openGeofiles(), so the badges are already there when
+      // the list first paints rather than appearing a round-trip later. A row whose
+      // badge has not arrived yet is indistinguishable from one the endpoint could
+      // not answer for, which is the one thing this list exists to tell apart.
+      // openGeofiles() still refreshes on open.
+      this.fetchGeofileStatus();
+      // Pick back up whatever was already running when this page loaded. Leaving the
+      // overview destroys this Vue instance (navigation is a full page load), but it
+      // does NOT stop the work: both downloads run on contexts of their own and Gin
+      // does not kill a handler when the browser walks away. Without these two the
+      // panel looked idle while it was still pulling a binary or 74MB of geo data.
+      if (PanelPlatform.panelUpdate) this.resumePanelUpdate();
+      this.geofileRunPoll();
+      if (PanelPlatform.panelUpdate) this.checkForUpdate(false); // best-effort update check on every overview load
+      this.announceUpdateResult(); // "Updated to vX" if this load follows a self-update
+
+      // Setup WebSocket for real-time updates
+      if (window.wsClient) {
+        window.wsClient.connect();
+        
+        // Listen for status updates
+        window.wsClient.on('status', (payload) => {
+          this.setStatus(payload);
+        });
+
+        // Listen for Xray state changes
+        window.wsClient.on('xray_state', (payload) => {
+          if (this.status && this.status.xray) {
+            this.status.xray.state = payload.state;
+            this.status.xray.errorMsg = payload.errorMsg || '';
+            switch (payload.state) {
+              case 'running':
+                this.status.xray.color = "green";
+                this.status.xray.stateMsg = '{{ i18n "pages.index.xrayStatusRunning" }}';
+                break;
+              case 'stop':
+                this.status.xray.color = "orange";
+                this.status.xray.stateMsg = '{{ i18n "pages.index.xrayStatusStop" }}';
+                break;
+              case 'error':
+                this.status.xray.color = "red";
+                this.status.xray.stateMsg = '{{ i18n "pages.index.xrayStatusError" }}';
+                break;
+            }
+          }
+        });
+
+        // Notifications disabled - white notifications are not needed
+
+        // Fallback to polling if WebSocket fails
+        window.wsClient.on('error', () => {
+          console.warn('WebSocket connection failed, falling back to polling');
+          this.startPolling();
+        });
+
+        window.wsClient.on('disconnected', () => {
+          if (window.wsClient.reconnectAttempts >= window.wsClient.maxReconnectAttempts) {
+            console.warn('WebSocket reconnection failed, falling back to polling');
+            this.startPolling();
+          }
+        });
+      } else {
+        // Fallback to polling if WebSocket is not available
+        this.startPolling();
+      }
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

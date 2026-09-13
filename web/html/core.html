@@ -1,0 +1,2148 @@
+{{ template "page/head_start" .}}
+<link rel="stylesheet"
+  href="{{ .base_path }}assets/codemirror/codemirror.min.css?{{ .asset_ver }}">
+<link rel="stylesheet"
+  href="{{ .base_path }}assets/codemirror/xq.min.css?{{ .asset_ver }}">
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+{{template "page/shell_start" . }}
+      <a-spin :spinning="spinning" :delay="300" tip='{{ i18n "loading"}}' size="large">
+        <transition name="list" appear>
+        <a-row :gutter="[16, 16]" :style="{ margin: 0 }">
+
+          <!-- Header -->
+          <a-col :span="24">
+            <a-card hoverable>
+              <a-row type="flex" justify="space-between" align="middle" :gutter="[8,8]">
+                <a-col>
+                  <h2 :style="{ margin: 0 }">{{ i18n "pages.core.title" }}</h2>
+                  <span :style="{ opacity: 0.65 }">{{ i18n "pages.core.subtitle" }}</span>
+                </a-col>
+                <a-col v-if="provisioned">
+                  <a-space>
+                    <a-button type="primary" @click="restartAll">
+                      <a-icon type="reload"></a-icon>Restart All Cores
+                    </a-button>
+                    <a-button @click="loadStatus(true)">
+                      <a-icon type="reload"></a-icon>{{ i18n "pages.core.refresh" }}
+                    </a-button>
+                  </a-space>
+                </a-col>
+              </a-row>
+            </a-card>
+          </a-col>
+
+          <!-- Reboot-required banner: persists on the page after the setup modal
+               is closed, so the operator can't miss it. -->
+          <a-col :span="24" v-if="loaded && rebootRequired">
+            <div class="reboot-banner">
+              <a-icon type="warning" theme="filled" class="reboot-banner-icon"></a-icon>
+              <div class="reboot-banner-body">
+                <div class="reboot-banner-title">{{ i18n "pages.core.rebootTitle" }}</div>
+                <div class="reboot-banner-text">{{ i18n "pages.core.rebootWhat" }}</div>
+              </div>
+              <div class="reboot-banner-actions">
+                <a-button size="small" @click="provisionVisible = true">
+                  {{ i18n "pages.core.rebootDetails" }}
+                </a-button>
+                <a-popconfirm title="{{ i18n "pages.core.rebootConfirm" }}" placement="bottomRight"
+                  @confirm="rebootNow" ok-text="{{ i18n "pages.core.rebootNow" }}"
+                  cancel-text="{{ i18n "cancel" }}">
+                  <a-button size="small" type="danger">
+                    <a-icon type="poweroff"></a-icon>{{ i18n "pages.core.rebootNow" }}
+                  </a-button>
+                </a-popconfirm>
+              </div>
+            </div>
+          </a-col>
+
+          <!-- First run: backend not provisioned yet -->
+          <a-col :span="24" v-if="loaded && !provisioned">
+            <a-card hoverable class="setup-hero">
+              <div class="setup-hero-badge">
+                <a-icon type="thunderbolt" theme="filled"></a-icon>
+              </div>
+              <div class="setup-hero-title">{{ i18n "pages.core.setupNeededTitle" }}</div>
+              <div class="setup-hero-desc">{{ i18n "pages.core.setupNeededDesc" }}</div>
+              <div class="setup-hero-steps">
+                <div class="setup-hero-step">
+                  <a-icon type="deployment-unit"></a-icon>{{ i18n "pages.core.stepModules" }}
+                </div>
+                <div class="setup-hero-step">
+                  <a-icon type="swap"></a-icon>{{ i18n "pages.core.stepForward" }}
+                </div>
+                <div class="setup-hero-step">
+                  <a-icon type="inbox"></a-icon>{{ i18n "pages.core.stepDaemons" }}
+                </div>
+                <div class="setup-hero-step">
+                  <a-icon type="lock"></a-icon>{{ i18n "pages.core.stepIpsec" }}
+                </div>
+              </div>
+              <a-button class="setup-hero-btn" type="primary" size="large"
+                :loading="provisionRunning" @click="openPicker('setup')">
+                <a-icon type="thunderbolt"></a-icon>{{ i18n "pages.core.initSetup" }}
+              </a-button>
+            </a-card>
+          </a-col>
+
+          <!-- Cores available but not installed. Informational, not a warning:
+               since setup became per-core these are cores the operator chose not
+               to install, so this offers them rather than complaining. -->
+          <a-col :span="24" v-if="provisioned && missingProtocols.length">
+            <a-alert type="info" show-icon :style="{ marginBottom: '16px' }">
+              <span slot="message">{{ i18n "pages.core.availableCoresTitle" }}</span>
+              <template slot="description">
+                <div :style="{ marginBottom: '10px' }">
+                  {{ i18n "pages.core.availableCoresDesc" }}
+                  <b>[[ missingProtocols.map(coreTitle).join(', ') ]]</b>
+                </div>
+                <a-button type="primary" size="small" :loading="provisionRunning" @click="openPicker('add')">
+                  <a-icon type="plus"></a-icon>{{ i18n "pages.core.addCore" }}
+                </a-button>
+              </template>
+            </a-alert>
+          </a-col>
+
+          <!-- Per-core cards -->
+          <a-col :span="24" v-if="provisioned">
+            <a-row type="flex" :gutter="[16, 16]">
+              <a-col :xs="24" :sm="12" :xl="8" v-for="core in cores" :key="core.name">
+                <a-card class="core-card" hoverable>
+                  <template #title>
+                    <a-icon :type="coreIcon(core.name)"></a-icon>
+                    <span :style="{ marginLeft: '8px' }">[[ coreTitle(core.name) ]]</span>
+                  </template>
+                  <template #extra>
+                    <span class="core-state" :class="'core-state-' + core.state">
+                      <span class="core-state-dot"></span>[[ stateText(core.state) ]]
+                    </span>
+                  </template>
+
+                  <div class="core-kv-list">
+                    <div class="core-kv">
+                      <span class="core-kv-label">{{ i18n "pages.core.version" }}</span>
+                      <span class="core-kv-value">[[ core.version || '—' ]]
+                        <a-tooltip v-if="core.name === 'xray'" title='{{ i18n "pages.index.xrayCoreLocked" }}'>
+                          <a-tag color="blue" :style="{ marginInlineStart: '6px' }">
+                            <a-icon type="lock"></a-icon> {{ i18n "pages.index.coreLockedTag" }}
+                          </a-tag>
+                        </a-tooltip>
+                      </span>
+                    </div>
+                    <div class="core-kv">
+                      <span class="core-kv-label">{{ i18n "pages.core.backend" }}</span>
+                      <span class="core-kv-value">[[ coreBackend(core.name) ]]</span>
+                    </div>
+                    <div class="core-kv" v-if="core.name !== 'xray' && core.name !== 'radius' && core.name !== 'ipsec'">
+                      <span class="core-kv-label">{{ i18n "pages.core.inbounds" }}</span>
+                      <span class="core-kv-value">[[ core.inbounds ]]</span>
+                    </div>
+                  </div>
+
+                  <a-alert v-if="core.detail" type="warning" :message="core.detail" banner
+                    :style="{ marginTop: '10px' }"></a-alert>
+
+                  <div class="core-actions">
+                    <a-space>
+                      <a-button size="small" type="primary" :disabled="!canRestart(core)"
+                        @click="restart(core.name)">
+                        <a-icon type="reload"></a-icon>{{ i18n "pages.core.restart" }}
+                      </a-button>
+                      <a-button size="small" type="danger" :disabled="!canStop(core)"
+                        @click="stop(core.name)">
+                        <a-icon type="pause-circle"></a-icon>{{ i18n "pages.core.stop" }}
+                      </a-button>
+                      <a-button size="small" @click="showLogs(core.name)">
+                        <a-icon type="file-text"></a-icon>{{ i18n "pages.core.logs" }}
+                      </a-button>
+                      <a-button size="small" v-if="core.name === 'xray'"
+                        :href="basePath + 'panel/xray'">
+                        <a-icon type="edit"></a-icon>{{ i18n "pages.core.editConfig" }}
+                      </a-button>
+                      <!-- A DISABLED antd button swallows its own mouse events, so a
+                           tooltip put directly on it never opens. The wrapping span is
+                           what the tooltip actually listens on, which is the only way
+                           the "this core has no config file" reason is ever readable. -->
+                      <a-tooltip v-else-if="!coreHasConfig(core.name)"
+                        title='{{ i18n "pages.core.configNoFile" }}'>
+                        <span :style="{ display: 'inline-block', cursor: 'not-allowed' }">
+                          <a-button size="small" disabled :style="{ pointerEvents: 'none' }">
+                            <a-icon type="edit"></a-icon>{{ i18n "pages.core.editConfig" }}
+                          </a-button>
+                        </span>
+                      </a-tooltip>
+                      <a-button size="small" v-else @click="openConfig(core.name)">
+                        <a-icon type="edit"></a-icon>{{ i18n "pages.core.editConfig" }}
+                      </a-button>
+                    </a-space>
+                  </div>
+                </a-card>
+              </a-col>
+            </a-row>
+          </a-col>
+
+          <!-- System / provisioning card -->
+          <a-col :span="24" v-if="provisioned">
+            <a-card hoverable>
+              <template #title>
+                <a-icon type="hdd"></a-icon>
+                <span :style="{ marginLeft: '8px' }">{{ i18n "pages.core.system" }}</span>
+              </template>
+              <template #extra>
+                <!-- Re-run repeats setup for exactly what is installed; Add and
+                     Uninstall change that set. Three verbs, one place. -->
+                <a-space :style="{ flexWrap: 'wrap' }">
+                  <a-button type="primary" :loading="provisionRunning" @click="reRunSetup">
+                    <a-icon type="thunderbolt"></a-icon>{{ i18n "pages.core.reRunSetup" }}
+                  </a-button>
+                  <a-button :loading="provisionRunning" @click="openPicker('add')">
+                    <a-icon type="plus"></a-icon>{{ i18n "pages.core.addCore" }}
+                  </a-button>
+                  <a-button type="danger" ghost :disabled="provisionRunning || uninstallRunning"
+                    @click="openPicker('uninstall')">
+                    <a-icon type="delete"></a-icon>{{ i18n "pages.core.uninstallCore" }}
+                  </a-button>
+                </a-space>
+              </template>
+
+              <p class="system-desc">{{ i18n "pages.core.provisionDesc" }}</p>
+
+              <a-row :gutter="[12, 12]">
+                <a-col :xs="24" :md="8">
+                  <div class="sys-tile" :class="system.ipForward ? 'sys-tile-ok' : 'sys-tile-bad'">
+                    <a-icon class="sys-tile-icon" theme="filled"
+                      :type="system.ipForward ? 'check-circle' : 'close-circle'"></a-icon>
+                    <div>
+                      <div class="sys-tile-name">{{ i18n "pages.core.ipForward" }}</div>
+                      <div class="sys-tile-state">
+                        [[ system.ipForward ? '{{ i18n "pages.core.enabled" }}' : '{{ i18n "pages.core.disabled" }}' ]]
+                      </div>
+                    </div>
+                  </div>
+                </a-col>
+                <a-col :xs="24" :md="8">
+                  <div class="sys-tile" :class="system.nftables ? 'sys-tile-ok' : 'sys-tile-bad'">
+                    <a-icon class="sys-tile-icon" theme="filled"
+                      :type="system.nftables ? 'check-circle' : 'close-circle'"></a-icon>
+                    <div>
+                      <div class="sys-tile-name">{{ i18n "pages.core.nftables" }}</div>
+                      <div class="sys-tile-state">
+                        [[ system.nftables ? '{{ i18n "pages.core.present" }}' : '{{ i18n "pages.core.absent" }}' ]]
+                      </div>
+                    </div>
+                  </div>
+                </a-col>
+                <a-col :xs="24" :md="8">
+                  <div class="sys-tile" :class="system.iproute ? 'sys-tile-ok' : 'sys-tile-bad'">
+                    <a-icon class="sys-tile-icon" theme="filled"
+                      :type="system.iproute ? 'check-circle' : 'close-circle'"></a-icon>
+                    <div>
+                      <div class="sys-tile-name">{{ i18n "pages.core.iproute" }}</div>
+                      <div class="sys-tile-state">
+                        [[ system.iproute ? '{{ i18n "pages.core.present" }}' : '{{ i18n "pages.core.absent" }}' ]]
+                      </div>
+                    </div>
+                  </div>
+                </a-col>
+              </a-row>
+
+              <div class="sys-section-title">{{ i18n "pages.core.kernelModules" }}</div>
+              <div class="module-grid">
+                <span v-for="m in system.modules" :key="m.name" class="module-chip"
+                  :class="m.loaded ? 'module-ok' : 'module-bad'">
+                  <a-icon :type="m.loaded ? 'check' : 'close'"></a-icon>
+                  [[ m.name ]]
+                </span>
+              </div>
+            </a-card>
+          </a-col>
+
+        </a-row>
+        </transition>
+      </a-spin>
+
+  <!-- Core picker: drives first-run setup, "add core" and "uninstall core". The
+       three differ only in which rows are selectable and what the OK button
+       does, so they share one dialog rather than three near-identical ones.
+       Nothing is pre-checked: installing a core changes the host, so it is the
+       operator who has to say which ones. -->
+  <a-modal v-model="pickerVisible" :footer="null" :title="pickerTitle()"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : '660px'"
+    wrapClassName="core-picker-modal">
+    <p class="picker-desc">[[ pickerDesc() ]]</p>
+
+    <div class="picker-toolbar">
+      <a-space>
+        <a-button size="small" :disabled="!pickerSelectableCount" @click="pickAll(true)">
+          <a-icon type="check-square"></a-icon>{{ i18n "pages.core.checkAll" }}
+        </a-button>
+        <a-button size="small" :disabled="!pickedCount" @click="pickAll(false)">
+          <a-icon type="border"></a-icon>{{ i18n "pages.core.uncheckAll" }}
+        </a-button>
+      </a-space>
+      <span class="picker-count">[[ pickedCount ]] / [[ pickerSelectableCount ]]</span>
+    </div>
+
+    <div class="picker-list">
+      <div v-if="!pickerCores.length" class="picker-empty">{{ i18n "pages.core.pickerEmpty" }}</div>
+      <label v-for="c in pickerCores" :key="c.name" class="picker-row"
+        :class="{ 'is-disabled': !rowEnabled(c), 'is-checked': !!picked[c.name] }">
+        <a-checkbox :checked="!!picked[c.name]" :disabled="!rowEnabled(c)"
+          @change="(e) => togglePick(c.name, e.target.checked)"></a-checkbox>
+        <span class="picker-body">
+          <span class="picker-name">
+            [[ c.title ]]
+            <a-tag v-if="c.installed" color="green" class="picker-tag">{{ i18n "pages.core.installedTag" }}</a-tag>
+          </span>
+          <span class="picker-sub">[[ c.desc ]]</span>
+          <span class="picker-note" v-if="rowNote(c)">
+            <a-icon type="info-circle"></a-icon>[[ rowNote(c) ]]
+          </span>
+          <!-- What this core will find ALREADY on the host: a distro daemon's config
+               it overwrites, a unit it disables, an interface of the operator's that
+               shares its naming space. Shown before the operator commits, because
+               "the panel took over my xl2tpd" should be a decision rather than a
+               discovery. The text is the server's (CoreOption.conflicts), so there is
+               no translation key: it names concrete host paths either way. -->
+          <span class="picker-conflict" v-for="cf in (c.conflicts || [])" :key="cf.what">
+            <a-icon type="exclamation-circle"></a-icon>[[ cf.what ]]: [[ cf.detail ]]
+          </span>
+        </span>
+        <span class="picker-backend">[[ c.backend ]]</span>
+      </label>
+    </div>
+
+    <div class="picker-foot">
+      <a-button @click="pickerVisible = false">{{ i18n "cancel" }}</a-button>
+      <a-button :type="pickerMode === 'uninstall' ? 'danger' : 'primary'"
+        :disabled="!pickedCount" @click="confirmPicker">
+        [[ pickerOkText() ]]
+      </a-button>
+    </div>
+  </a-modal>
+
+  <!-- Inbound disposition. Removing a core takes the daemon its inbounds run on,
+       so this is asked rather than assumed. Keeping them is a legitimate answer:
+       the inbounds survive and start working again if the core is reinstalled. -->
+  <a-modal v-model="inboundChoice.visible" :title="'{{ i18n "pages.core.uninstallInboundsTitle" }}'"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : 520"
+    ok-text='{{ i18n "pages.core.uninstallCore" }}' cancel-text='{{ i18n "cancel" }}'
+    ok-type="danger" :closable="true" :mask-closable="false"
+    @ok="confirmInboundChoice" @cancel="() => inboundChoice.visible = false">
+    <a-alert type="warning" show-icon :style="{ marginBottom: '16px' }">
+      <template slot="message">
+        [[ inboundChoice.count ]] {{ i18n "pages.core.uninstallInboundsBody" }}
+      </template>
+    </a-alert>
+    <!-- a-radio labels are single-line with a fixed height in antd-vue 1.7.8; the
+         whiteSpace/height/lineHeight overrides let the descriptions wrap. -->
+    <a-radio-group v-model="inboundChoice.mode"
+      :style="{ display: 'flex', flexDirection: 'column', gap: '12px' }">
+      <a-radio value="delete" :style="{ whiteSpace: 'normal', height: 'auto', lineHeight: '1.4' }">
+        <span :style="{ fontWeight: 600, color: 'var(--error)' }">{{ i18n "pages.core.uninstallInboundsDelete" }}</span>
+        <div class="bo-muted" :style="{ marginLeft: '24px' }">{{ i18n "pages.core.uninstallInboundsDeleteDesc" }}</div>
+      </a-radio>
+      <a-radio value="keep" :style="{ whiteSpace: 'normal', height: 'auto', lineHeight: '1.4' }">
+        <span :style="{ fontWeight: 600 }">{{ i18n "pages.core.uninstallInboundsKeep" }}</span>
+        <div class="bo-muted" :style="{ marginLeft: '24px' }">{{ i18n "pages.core.uninstallInboundsKeepDesc" }}</div>
+      </a-radio>
+    </a-radio-group>
+  </a-modal>
+
+  <!-- Provision live log: a real streaming terminal console. Closing mid-run is
+       safe — provisioning runs server-side and the poll keeps ticking. -->
+  <a-modal v-model="provisionVisible" :title="null" :footer="null"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : '680px'"
+    :maskClosable="!provisionRunning" wrapClassName="setup-modal">
+    <div class="setup-modal-head">
+      <div class="setup-modal-head-icon" :class="headStateClass()">
+        <a-icon :type="headStateIcon()" :spin="provisionRunning"></a-icon>
+      </div>
+      <div class="setup-modal-head-title">[[ provisionTitle() ]]</div>
+    </div>
+
+    <div class="term term--setup">
+      <div class="term-bar">
+        <a-icon type="code" class="term-bar-icon"></a-icon>
+        <span class="term-bar-title">vpn-ui · [[ consoleLabel() ]]</span>
+        <span class="term-count" v-if="provisionResult.length">[[ okCount() ]]/[[ provisionResult.length ]]</span>
+      </div>
+      <div class="term-progress">
+        <div class="term-progress-bar"
+          :class="{ warn: !provisionRunning && rebootRequired, done: !provisionRunning && provisionDone && !rebootRequired }"
+          :style="{ width: provProgress() + '%' }"></div>
+      </div>
+      <div class="term-body" ref="term">
+        <!-- One row per step: leading ✓/!/✗ glyph, name, detail, timestamp on the
+             right. Rows that captured command output are clickable to expand it. -->
+        <div v-for="(item, i) in provisionResult" :key="i" class="term-step">
+          <div class="term-line" :class="[lineClass(item), item.log ? 'term-clickable' : '']"
+            @click="item.log && toggleStep(i)"
+            :title="item.log ? (expanded[i] ? '{{ i18n "pages.core.hideLog" }}' : '{{ i18n "pages.core.showLog" }}') : ''">
+            <span class="term-glyph">[[ glyph(item) ]]</span>
+            <span class="term-name">[[ item.name ]]</span>
+            <span class="term-msg" v-if="item.msg">[[ item.msg ]]</span>
+            <a-icon v-if="item.log" :type="expanded[i] ? 'up' : 'down'" class="term-toggle"></a-icon>
+            <span class="term-ts">[[ item.ts ]]</span>
+          </div>
+          <pre v-if="item.log && expanded[i]" class="term-steplog">[[ item.log ]]</pre>
+        </div>
+
+        <!-- Running: percent + step in flight (the progress bar is the strip above). -->
+        <div v-if="provisionRunning" class="term-status">
+          <span class="term-pct">[[ provProgress() ]]%</span>
+          <span class="term-cur" v-if="currentStep()">⟳ [[ currentStep() ]]</span>
+        </div>
+
+        <!-- Done: ✓/!/✗ tally + how long it took. -->
+        <div v-if="!provisionRunning && provisionDone" class="term-status term-status-done">
+          <span class="term-summary">[[ provSummary() ]]</span>
+          <span class="term-elapsed" v-if="elapsedText()">· [[ elapsedText() ]]</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- What an uninstall deliberately left behind, and who still needs it.
+         Shown because "removed IKEv2" and "IPsec still up for L2TP" are two
+         different facts and the operator should not have to infer the second. -->
+    <div v-if="runKind === 'uninstall' && !provisionRunning && keptShared.length" class="kept-panel">
+      <div class="kept-panel-head">
+        <a-icon type="lock"></a-icon>
+        <span>{{ i18n "pages.core.uninstallKept" }}</span>
+      </div>
+      <ul class="kept-list">
+        <li v-for="(k, i) in keptShared" :key="i">[[ k ]]</li>
+      </ul>
+    </div>
+
+    <!-- Reboot-required explainer: what happened, why, and what to do -->
+    <div v-if="rebootRequired && runKind === 'setup'" class="reboot-panel">
+      <div class="reboot-panel-head">
+        <a-icon type="warning" theme="filled" class="reboot-panel-icon"></a-icon>
+        <span class="reboot-panel-title">{{ i18n "pages.core.rebootTitle" }}</span>
+      </div>
+      <div class="reboot-panel-what">{{ i18n "pages.core.rebootWhat" }}</div>
+      <div class="reboot-facts">
+        <div class="reboot-fact" v-if="rebootPkg">
+          <span class="reboot-fact-label">{{ i18n "pages.core.rebootPkgLabel" }}</span>
+          <code class="reboot-fact-pkg">[[ rebootPkg ]]</code>
+        </div>
+        <div class="reboot-fact" v-if="rebootModules.length">
+          <span class="reboot-fact-label">{{ i18n "pages.core.rebootModulesLabel" }}</span>
+          <span class="reboot-mods">
+            <code v-for="m in rebootModules" :key="m" class="reboot-mod">[[ m ]]</code>
+          </span>
+        </div>
+      </div>
+      <div class="reboot-impact">
+        <a-icon type="info-circle"></a-icon>
+        <span>{{ i18n "pages.core.rebootImpact" }}</span>
+      </div>
+      <div class="reboot-panel-actions">
+        <a-button @click="provisionVisible = false">{{ i18n "pages.core.rebootLater" }}</a-button>
+        <a-popconfirm title="{{ i18n "pages.core.rebootConfirm" }}" placement="topRight"
+          @confirm="rebootNow" ok-text="{{ i18n "pages.core.rebootNow" }}"
+          cancel-text="{{ i18n "cancel" }}">
+          <a-button type="danger"><a-icon type="poweroff"></a-icon>{{ i18n "pages.core.rebootNow" }}</a-button>
+        </a-popconfirm>
+      </div>
+    </div>
+
+    <div v-if="!provisionRunning && !(rebootRequired && runKind === 'setup')" class="setup-modal-foot">
+      <a-button type="primary" @click="provisionVisible = false">{{ i18n "close" }}</a-button>
+    </div>
+  </a-modal>
+
+  <!-- Rebooting overlay: shown after the operator confirms a reboot -->
+  <a-modal :visible="rebooting" :title="null" :footer="null" :closable="false"
+    :maskClosable="false" :keyboard="false" :class="themeSwitcher.currentTheme"
+    :width="isMobile ? '95%' : '420px'">
+    <div class="rebooting-box">
+      <a-icon type="poweroff" class="rebooting-icon"></a-icon>
+      <div class="rebooting-title">{{ i18n "pages.core.rebooting" }}</div>
+      <div class="rebooting-desc">{{ i18n "pages.core.rebootingDesc" }}</div>
+      <a-spin :spinning="true"></a-spin>
+    </div>
+  </a-modal>
+
+  <!-- Core logs -->
+  <a-modal v-model="logsVisible" :title="logsTitle + ' — {{ i18n "pages.core.logs" }}'" :footer="null"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : '80%'">
+    <div :style="{ textAlign: 'right', marginBottom: '8px' }">
+      <a-space>
+        <a-button size="small" :disabled="!logsContent" @click="downloadLogs">
+          <a-icon type="download"></a-icon>Download
+        </a-button>
+        <a-button size="small" :loading="logsLoading" @click="loadLogs(logsCore)">
+          <a-icon type="reload"></a-icon>{{ i18n "pages.core.refresh" }}
+        </a-button>
+        <a-button size="small" :type="logsLive ? 'primary' : 'default'"
+          :class="{ 'log-live-on': logsLive }" @click="setLogsLive(!logsLive)">
+          <span class="log-live-dot" v-if="logsLive"></span>{{ i18n "pages.index.liveLog" }}
+        </a-button>
+      </a-space>
+    </div>
+    <!-- Rendered through LogFormatter (assets/js/util/index.js), the same
+         renderer the overview's log modal uses, so a core's output looks the
+         same wherever it is read. It escapes every scrap of log text before
+         adding markup; log lines echo client-supplied names and are not
+         trusted input. -->
+    <div id="core-log-pane" class="core-logs log-container" v-html="logsHtml"></div>
+  </a-modal>
+
+  <!-- Advanced config editor. Every rule for this markup is scoped under
+       `.core-page~div` in the style block below: an a-modal portals out of #app
+       and mounts as a SIBLING of it, so a plain `.core-page .cfg-x` descendant
+       rule would never match anything in here. -->
+  <a-modal v-model="cfgVisible" :footer="null" :maskClosable="false"
+    :class="themeSwitcher.currentTheme" :width="isMobile ? '95%' : (cfgEmpty ? '420px' : '92%')"
+    :title="cfgTitle" :after-close="disposeCfgEditor">
+    <a-spin :spinning="cfgLoading">
+      <!-- The only warning, and it carries every consequence at once: the file is
+           generated, a bad edit takes the core and its clients down, and saving
+           FREEZES the file. The freeze used to be explained by the mode selector;
+           with one editor and no modes, this alert is the only place it can be
+           said. None of it applies when there is nothing to edit, so it is
+           dropped along with the rest of the editor shell in that case. -->
+      <a-alert v-if="!cfgEmpty" type="error" show-icon
+        message='{{ i18n "pages.core.configDanger" }}'
+        description='{{ i18n "pages.core.configIntro" }}'
+        :style="{ marginBottom: '12px' }"></a-alert>
+
+      <!-- No inbound to generate a config from: a short note and a single
+           acknowledgement button, not the full editor sized for a file that
+           does not exist. -->
+      <template v-if="cfgEmpty">
+        <div class="cfg-empty">
+          {{ i18n "pages.core.configNoTargets" }}
+        </div>
+        <div class="cfg-empty-foot">
+          <a-button type="primary" @click="cfgVisible = false">{{ i18n "close" }}</a-button>
+        </div>
+      </template>
+
+      <div v-show="cfgTargets.length">
+        <!-- The picker stays because a core can write more than one file: OpenVPN
+             one per transport, l2tp a daemon config plus a pppd options file plus
+             its swanctl connection. -->
+        <a-row :gutter="[16, 12]" class="cfg-toolbar">
+          <a-col :xs="24" :md="12">
+            <div class="cfg-field-label">{{ i18n "pages.core.configFile" }}</div>
+            <a-select v-model="cfgIndex" :style="{ width: '100%' }"
+              @change="selectCfgTarget">
+              <a-select-option v-for="(t, i) in cfgTargets" :key="i" :value="i">
+                [[ cfgOptionLabel(t) ]]
+              </a-select-option>
+            </a-select>
+            <div class="cfg-path">
+              <span class="cfg-path-text">[[ cfgTarget.path ]]</span>
+              <!-- The one piece of state the text alone cannot show: whether this
+                   file is frozen at an override right now, or still following the
+                   inbound settings. -->
+              <a-tag v-if="cfgHasOverride" color="orange">{{ i18n "pages.core.configOverridden" }}</a-tag>
+            </div>
+          </a-col>
+        </a-row>
+
+        <div v-if="cfgHealth && !cfgHealth.ok" class="cfg-health">
+          <div class="cfg-health-head">
+            <a-icon type="close-circle" theme="filled"></a-icon>
+            <span>{{ i18n "pages.core.configHealthBad" }}</span>
+          </div>
+          <pre class="cfg-health-log" v-if="cfgHealth.logs">[[ cfgHealth.logs ]]</pre>
+        </div>
+
+        <!-- One pane, holding the whole file as it stands. There is no second
+             read-only pane to compare against because there is nothing to compare:
+             what is in here IS what gets written. -->
+        <div class="cfg-editor">
+          <textarea id="cfg-editor"></textarea>
+        </div>
+
+        <div class="cfg-foot">
+          <!-- No confirm on reset: it puts the panel's own config back, which is the
+               safe direction. Save keeps one, being the half that can take the core
+               down. -->
+          <a-button type="danger" ghost :disabled="cfgSaving" @click="resetConfig">
+            <a-icon type="undo"></a-icon>{{ i18n "pages.core.configReset" }}
+          </a-button>
+          <span class="cfg-foot-gap"></span>
+          <a-button :disabled="cfgSaving" @click="cfgVisible = false">{{ i18n "close" }}</a-button>
+          <a-popconfirm title="{{ i18n "pages.core.configSaveConfirm" }}" placement="topRight"
+            @confirm="saveConfig" ok-text="{{ i18n "confirm" }}" cancel-text="{{ i18n "cancel" }}">
+            <a-button type="primary" :loading="cfgSaving">
+              <a-icon type="save"></a-icon>{{ i18n "pages.core.configSave" }}
+            </a-button>
+          </a-popconfirm>
+        </div>
+      </div>
+    </a-spin>
+  </a-modal>
+{{template "page/shell_end" . }}
+
+{{template "page/body_scripts" .}}
+<!-- The config editor's syntax modes. javascript.js is not pulled in: the only
+     JSON config the panel writes is Xray's, and that one is edited on its own
+     page. properties covers the ini/conf/pppd/swanctl shapes, toml covers
+     mtproto's config.toml. -->
+<script
+  src="{{ .base_path }}assets/codemirror/codemirror.min.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/properties.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/toml.js?{{ .asset_ver }}"></script>
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+<script>
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    mixins: [MediaQueryMixin],
+    el: '#app',
+    data: {
+      themeSwitcher,
+      pageTitle: '{{ i18n "menu.core"}}',
+      // A real hook, not cosmetic: the config editor's CSS has to reach an
+      // a-modal that portals out of #app, and the only selector that can do that
+      // is a sibling one anchored on this class (see the style block).
+      pageClass: 'core-page',
+      spinning: false,
+      loaded: false,
+      provisioned: false,
+      missingProtocols: [],
+      cores: [],
+      system: { modules: [] },
+      provisionRunning: false,
+      provisionDone: false,
+      provisionVisible: false,
+      provisionResult: [],
+      // Which run the shared console is showing: 'setup' or 'uninstall'. Only
+      // the poll endpoint, the title and the trailing panels differ.
+      runKind: 'setup',
+      uninstallRunning: false,
+      keptShared: [],
+      // "these cores still have inbounds" prompt. `answered` is what lets the
+      // second startUninstall call through instead of re-opening the dialog.
+      inboundChoice: { visible: false, answered: false, cores: [], count: 0, mode: 'delete' },
+      // Core picker.
+      catalog: [],
+      pickerVisible: false,
+      pickerMode: 'setup',
+      picked: {},
+      provStamps: [],
+      nowStamp: '',
+      provStartMs: 0,
+      provEndMs: 0,
+      nowMs: 0,
+      expanded: {},
+      provTimer: null,
+      rebootRequired: false,
+      rebootModules: [],
+      rebootPkg: '',
+      rebooting: false,
+      reconnectTimer: null,
+      basePath: '{{ .base_path }}',
+      logsVisible: false,
+      logsLoading: false,
+      logsCore: '',
+      logsTitle: '',
+      logsContent: '',
+      logsLive: false,
+      // --- advanced config editor ---------------------------------------
+      cfgVisible: false,
+      cfgLoading: false,
+      cfgSaving: false,
+      cfgCore: '',
+      cfgTargets: [],
+      cfgIndex: 0,
+      cfgText: '',
+      cfgHealth: null,
+      // The CodeMirror instance. Held here rather than rebuilt per render because
+      // the modal remounts its body and a leaked instance stacks a second editor
+      // on top of the first.
+      cfgCm: null,
+    },
+    methods: {
+      async loadStatus(showSpin) {
+        if (showSpin) this.spinning = true;
+        const msg = await HttpUtil.get('/panel/core/status');
+        if (msg && msg.success && msg.obj) {
+          this.cores = msg.obj.cores || [];
+          this.system = msg.obj.system || { modules: [] };
+          this.provisioned = !!msg.obj.provisioned;
+          this.missingProtocols = msg.obj.missingProtocols || [];
+          this.applyReboot(msg.obj);
+        }
+        this.loaded = true;
+        this.spinning = false;
+      },
+      async restart(core) {
+        this.spinning = true;
+        await HttpUtil.post('/panel/core/restart/' + core);
+        await this.loadStatus(false);
+      },
+      async restartAll() {
+        this.spinning = true;
+        await HttpUtil.post('/panel/core/restart-all');
+        await this.loadStatus(false);
+      },
+      async stop(core) {
+        this.spinning = true;
+        await HttpUtil.post('/panel/core/stop/' + core);
+        await this.loadStatus(false);
+      },
+      async showLogs(core) {
+        this.logsCore = core;
+        this.logsTitle = this.coreTitle(core);
+        this.logsContent = '';
+        this.setLogsLive(false);
+        this.logsVisible = true;
+        await this.loadLogs(core);
+      },
+      // quiet=true is the live tail's refresh: no spinner, and the scroll stays
+      // put unless the reader is already following the end of the log.
+      async loadLogs(core, quiet) {
+        if (!quiet) this.logsLoading = true;
+        const msg = await HttpUtil.get('/panel/core/logs/' + core);
+        if (!quiet) this.logsLoading = false;
+        if (msg && msg.success) {
+          LiveLog.keepPinned('#core-log-pane', () => { this.logsContent = msg.obj || ''; });
+        }
+      },
+      // Same live tail as the overview's log modal, against this one core.
+      setLogsLive(on) {
+        this.logsLive = !!on;
+        LiveLog.stop('core-log');
+        if (this.logsLive) {
+          LiveLog.start('core-log', () => {
+            if (!this.logsVisible) { this.setLogsLive(false); return; }
+            this.loadLogs(this.logsCore, true);
+          });
+        }
+      },
+      downloadLogs() {
+        if (!this.logsContent) return;
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, '0');
+        const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+        const blob = new Blob([this.logsContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (this.logsCore || 'core') + '-logs-' + stamp + '.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+      // --- advanced config editor ----------------------------------------
+      // Which cores could ever have a file to edit. wg-c, AmneziaWG, SSH and
+      // RADIUS never do: the first two are programmed through kernel netlink and
+      // the last two run inside the panel binary, so there is no config text
+      // anywhere to show. GRE stays in: the tunnel itself is netlink, but its
+      // optional IPsec layer is a swanctl file like any other.
+      coreHasConfig(name) {
+        return ['wgc', 'awg', 'ssh', 'radius'].indexOf(name) < 0;
+      },
+      async openConfig(core) {
+        this.cfgCore = core;
+        this.cfgTargets = [];
+        this.cfgIndex = 0;
+        this.cfgText = '';
+        this.cfgHealth = null;
+        this.cfgVisible = true;
+        await this.loadCfgTargets();
+      },
+      async loadCfgTargets() {
+        this.cfgLoading = true;
+        const msg = await HttpUtil.get('/panel/core/config/' + this.cfgCore);
+        this.cfgLoading = false;
+        this.cfgTargets = (msg && msg.success && msg.obj && msg.obj.targets) || [];
+        if (this.cfgIndex >= this.cfgTargets.length) this.cfgIndex = 0;
+        this.applyCfgTarget();
+      },
+      // a-select hands the new value to @change, and reading this.cfgIndex here
+      // instead would race v-model's own write to it.
+      selectCfgTarget(index) {
+        this.cfgIndex = index;
+        this.applyCfgTarget();
+      },
+      // The editor is filled with the file AS IT STANDS: the override when there is
+      // one, the panel's own render when there is not. Starting from the real text
+      // is what lets the modal drop the second pane, because the operator is no
+      // longer writing a fragment against a file they cannot see.
+      applyCfgTarget() {
+        const t = this.cfgTarget;
+        this.cfgText = (t && t.current) || '';
+        this.$nextTick(() => this.mountCfgEditor());
+      },
+      cfgCmMode(format) {
+        // Outside Xray's JSON the panel writes exactly two syntaxes: mtproto's
+        // TOML, and key/value with # comments (ini, pppd options, openvpn,
+        // swanctl) which the vendored properties mode covers, [section] headers
+        // included.
+        return format === 'toml' ? 'text/x-toml' : 'text/x-properties';
+      },
+      cfgCmOptions(mode) {
+        return {
+          lineNumbers: true,
+          mode: mode,
+          theme: 'xq',
+          // No styleActiveLine here: that option needs addon/selection/active-line,
+          // which is not vendored, so CodeMirror silently ignores it. Left out
+          // rather than left in, so nobody reads it as a working setting.
+          lineWrapping: true,
+          indentUnit: 2,
+          tabSize: 2,
+          lineWiseCopyCut: false,
+        };
+      },
+      mountCfgEditor() {
+        if (!this.cfgTargets.length) return;
+        const el = document.getElementById('cfg-editor');
+        if (!el) return;
+        const mode = this.cfgCmMode(this.cfgTarget.format);
+        if (!this.cfgCm) {
+          this.cfgCm = CodeMirror.fromTextArea(el, this.cfgCmOptions(mode));
+          this.cfgCm.on('change', (editor) => { this.cfgText = editor.getValue(); });
+        }
+        this.cfgCm.setOption('mode', mode);
+        if (this.cfgCm.getValue() !== this.cfgText) this.cfgCm.setValue(this.cfgText);
+        // A CodeMirror built while the modal is still animating measures its
+        // gutters against a box that has no width yet and lays every line on top
+        // of the last. refresh() once the dialog has settled is the fix.
+        setTimeout(() => {
+          if (this.cfgCm) this.cfgCm.refresh();
+        }, 300);
+      },
+      // toTextArea() puts the original <textarea> back. Skipping it leaves the
+      // node CodeMirror replaced in the DOM, so the next open calls
+      // fromTextArea on something that is no longer a textarea and the editor
+      // simply never appears.
+      disposeCfgEditor() {
+        if (this.cfgCm) { this.cfgCm.toTextArea(); this.cfgCm = null; }
+        this.cfgHealth = null;
+      },
+      cfgOptionLabel(t) {
+        const owner = t.remark || (t.inbound ? '#' + t.inbound : '');
+        return owner ? owner + ' / ' + t.label : t.label;
+      },
+      async saveConfig() {
+        const t = this.cfgTarget;
+        if (!t || !t.file) return;
+        this.cfgSaving = true;
+        this.cfgHealth = null;
+        // Always `replace`: the editor holds the WHOLE file, so the whole file is
+        // what gets posted. append is still an API mode (see coreconfig.go), it just
+        // has no control here. The file is addressed by inbound + name, never by
+        // path: the server matches both against a catalog it builds itself, so no
+        // path from this page can steer the write.
+        const msg = await HttpUtil.post('/panel/core/config/' + this.cfgCore, {
+          inboundId: t.inbound || 0,
+          file: t.file,
+          mode: 'replace',
+          text: this.cfgText,
+        });
+        this.cfgSaving = false;
+        if (msg && msg.success && msg.obj) {
+          this.cfgHealth = msg.obj.health || null;
+          if (msg.obj.targets) this.cfgTargets = msg.obj.targets;
+          // On a revert the STORED override is back to what it was, but the
+          // operator's text stays in the editor: it is the thing they now have to
+          // fix, and refilling from the reverted store would silently throw it away.
+          if (!this.cfgHealth || !this.cfgHealth.reverted) this.applyCfgTarget();
+        }
+        await this.loadStatus(false);
+      },
+      // Clearing the text IS the reset: an empty override is stored as no override
+      // at all, so the next generation writes the panel's own render and the editor
+      // is refilled with it. With nothing stored there is nothing to apply, so the
+      // text is simply put back rather than restarting the core over a no-op.
+      async resetConfig() {
+        if (!this.cfgHasOverride) {
+          this.cfgHealth = null;
+          this.applyCfgTarget();
+          return;
+        }
+        this.cfgText = '';
+        await this.saveConfig();
+      },
+      // --- core picker (setup / add / uninstall) -------------------------
+      async loadCatalog() {
+        const msg = await HttpUtil.get('/panel/core/catalog');
+        if (msg && msg.success && msg.obj) this.catalog = msg.obj.cores || [];
+      },
+      // Opens the picker in one of three modes. Selections always start empty:
+      // an install changes the host, so nothing is opted into by default.
+      async openPicker(mode) {
+        this.pickerMode = mode;
+        this.picked = {};
+        this.pickerVisible = true;
+        await this.loadCatalog();
+      },
+      // Which rows the current mode shows. Built-in cores (Xray, RADIUS, SSH)
+      // are never listed: they ride inside the panel and have nothing to
+      // install or remove.
+      rowEnabled(c) {
+        if (c.builtin) return false;
+        // A core with inbounds is selectable now. It used to be greyed out, which
+        // left the operator no way forward at all: the note said "still has N
+        // inbounds" and the row simply could not be ticked. Picking it now opens
+        // the disposition prompt instead, where they choose to delete those
+        // inbounds or keep them.
+        if (this.pickerMode === 'uninstall') return c.installed;
+        return !c.installed;
+      },
+      // The one-line reason a row cannot be picked, so a disabled checkbox is
+      // never unexplained.
+      rowNote(c) {
+        if (this.pickerMode === 'uninstall') {
+          if (c.inbounds) {
+            return '{{ i18n "pages.core.hasInbounds" }}'.replace('%d', c.inbounds);
+          }
+          if (c.shares && c.shares.length) {
+            return '{{ i18n "pages.core.sharesWith" }}' + ' ' +
+              c.shares.map(this.coreTitle).join(', ');
+          }
+          return '';
+        }
+        if (c.installed) return '{{ i18n "pages.core.alreadyInstalled" }}';
+        if (c.shares && c.shares.length) {
+          return '{{ i18n "pages.core.sharesWith" }}' + ' ' +
+            c.shares.map(this.coreTitle).join(', ');
+        }
+        return '';
+      },
+      pickAll(on) {
+        const next = {};
+        for (const c of this.pickerCores) {
+          if (on && this.rowEnabled(c)) next[c.name] = true;
+        }
+        this.picked = next;
+      },
+      togglePick(name, on) {
+        // Vue 2 cannot see a plain key assignment on an object, hence $set/$delete.
+        if (on) this.$set(this.picked, name, true);
+        else this.$delete(this.picked, name);
+      },
+      pickerTitle() {
+        return ({
+          setup: '{{ i18n "pages.core.pickerSetupTitle" }}',
+          add: '{{ i18n "pages.core.pickerAddTitle" }}',
+          uninstall: '{{ i18n "pages.core.pickerUninstallTitle" }}',
+        })[this.pickerMode];
+      },
+      pickerDesc() {
+        return ({
+          setup: '{{ i18n "pages.core.pickerSetupDesc" }}',
+          add: '{{ i18n "pages.core.pickerAddDesc" }}',
+          uninstall: '{{ i18n "pages.core.pickerUninstallDesc" }}',
+        })[this.pickerMode];
+      },
+      pickerOkText() {
+        return ({
+          setup: '{{ i18n "pages.core.pickerInstall" }}',
+          add: '{{ i18n "pages.core.pickerInstall" }}',
+          uninstall: '{{ i18n "pages.core.pickerUninstall" }}',
+        })[this.pickerMode];
+      },
+      confirmPicker() {
+        const names = Object.keys(this.picked);
+        if (!names.length) return;
+        this.pickerVisible = false;
+        if (this.pickerMode === 'uninstall') this.startUninstall(names);
+        else this.startProvision(names);
+      },
+      // Re-run repeats setup for exactly the cores already installed, so it stays
+      // the idempotent "fix my host" button it has always been instead of
+      // quietly installing everything.
+      reRunSetup() {
+        const installed = this.catalog
+          .filter((c) => c.installed && !c.builtin).map((c) => c.name);
+        this.startProvision(installed);
+      },
+      // resetConsole clears the shared terminal for a fresh run.
+      resetConsole(kind) {
+        this.runKind = kind;
+        this.provisionResult = [];
+        this.provStamps = [];
+        this.expanded = {};
+        this.provisionDone = false;
+        this.keptShared = [];
+        this.rebootRequired = false;
+        this.rebootModules = [];
+        this.rebootPkg = '';
+        this.provisionRunning = true;
+        this.provisionVisible = true;
+        this.provStartMs = Date.now();
+        this.provEndMs = 0;
+        this.nowMs = this.provStartMs;
+        this.tick();
+      },
+      // startProvision kicks off backend provisioning for the given cores and
+      // opens a live terminal that ticks each step as it completes. The run
+      // itself happens server-side; we poll for its progress so it survives the
+      // modal being closed and works through gzip/reverse proxies (no
+      // SSE/WebSocket).
+      async startProvision(cores) {
+        if (this.provisionRunning) return;
+        this.resetConsole('setup');
+        const msg = await HttpUtil.post('/panel/core/provision',
+          { cores: (cores || []).join(',') });
+        if (msg && msg.success && msg.obj) {
+          this.applySteps(msg.obj.steps || []);
+          this.applyReboot(msg.obj);
+        }
+        this.pollProvision();
+      },
+      pollProvision() {
+        clearTimeout(this.provTimer);
+        this.provTimer = setTimeout(async () => {
+          const msg = await HttpUtil.get('/panel/core/provision-status');
+          if (msg && msg.success && msg.obj) {
+            this.applySteps(msg.obj.steps || []);
+            this.provisionRunning = !!msg.obj.running;
+            this.provisionDone = !!msg.obj.done;
+            this.applyReboot(msg.obj);
+            this.tick();
+            if (!msg.obj.running) {
+              this.provEndMs = Date.now();
+              this.provisioned = !!msg.obj.provisioned;
+              await this.loadStatus(false);
+              await this.loadCatalog();
+              this.$nextTick(() => this.scrollTerm());
+              return; // run finished, stop polling
+            }
+          }
+          this.pollProvision();
+        }, 600);
+      },
+      // Re-enters startUninstall with the answer recorded, which is what lets it
+      // past the prompt this time.
+      confirmInboundChoice() {
+        this.inboundChoice.visible = false;
+        this.inboundChoice.answered = true;
+        this.startUninstall(this.inboundChoice.cores);
+      },
+      // startUninstall removes the given cores. The server refuses up front when
+      // a core still has inbounds or is not installed, and that refusal arrives
+      // as a plain failed response, so the console is closed again rather than
+      // left open on a run that never began.
+      async startUninstall(cores) {
+        if (this.provisionRunning || this.uninstallRunning) return;
+        // Removing a core takes away the daemon its inbounds run on, so that
+        // cannot be decided silently. Ask first; the server refuses an uninstall
+        // that carries no answer, so this prompt is the only way through.
+        const affected = (cores || []).reduce((n, name) => {
+          const c = this.pickerCores.find(x => x.name === name);
+          return n + ((c && c.inbounds) || 0);
+        }, 0);
+        if (affected > 0 && !this.inboundChoice.answered) {
+          this.inboundChoice = {
+            visible: true, answered: false, cores: cores || [],
+            count: affected, mode: 'delete',
+          };
+          return;
+        }
+        const inbounds = this.inboundChoice.answered ? this.inboundChoice.mode : '';
+        this.inboundChoice.answered = false;
+        this.resetConsole('uninstall');
+        this.uninstallRunning = true;
+        const msg = await HttpUtil.post('/panel/core/uninstall',
+          { cores: (cores || []).join(','), inbounds: inbounds });
+        if (!msg || !msg.success) {
+          this.provisionRunning = false;
+          this.uninstallRunning = false;
+          this.provisionVisible = false;
+          return;
+        }
+        this.applySteps((msg.obj && msg.obj.steps) || []);
+        this.pollUninstall();
+      },
+      pollUninstall() {
+        clearTimeout(this.provTimer);
+        this.provTimer = setTimeout(async () => {
+          const msg = await HttpUtil.get('/panel/core/uninstall-status');
+          if (msg && msg.success && msg.obj) {
+            this.applySteps(msg.obj.steps || []);
+            this.provisionRunning = !!msg.obj.running;
+            this.uninstallRunning = !!msg.obj.running;
+            this.provisionDone = !!msg.obj.done;
+            this.keptShared = msg.obj.kept || [];
+            this.tick();
+            if (!msg.obj.running) {
+              this.provEndMs = Date.now();
+              await this.loadStatus(false);
+              await this.loadCatalog();
+              this.$nextTick(() => this.scrollTerm());
+              return;
+            }
+          }
+          this.pollUninstall();
+        }, 600);
+      },
+      // applySteps stamps every newly-arrived step with a client-side wall-clock
+      // time (the server streams the same growing array on each poll, so we only
+      // stamp indices we haven't seen) and auto-scrolls the console to the bottom.
+      applySteps(steps) {
+        for (let i = this.provStamps.length; i < steps.length; i++) {
+          this.provStamps.push(this.tsNow());
+        }
+        this.provisionResult = steps.map((s, i) => Object.assign({}, s, { ts: this.provStamps[i] }));
+        this.$nextTick(() => this.scrollTerm());
+      },
+      applyReboot(obj) {
+        this.rebootRequired = !!obj.rebootRequired;
+        this.rebootModules = obj.rebootModules || [];
+        this.rebootPkg = obj.rebootPkg || '';
+      },
+      scrollTerm() {
+        const el = this.$refs.term;
+        if (el) el.scrollTop = el.scrollHeight;
+      },
+      tsNow() {
+        const d = new Date();
+        const p = (n) => String(n).padStart(2, '0');
+        return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+      },
+      tick() {
+        this.nowStamp = this.tsNow();
+        this.nowMs = Date.now();
+      },
+      glyph(item) {
+        if (!item.ok) return '✗';
+        if (item.warn) return '!';
+        return '✓';
+      },
+      lineClass(item) {
+        if (!item.ok) return 'term-err';
+        if (item.warn) return 'term-warn';
+        return 'term-ok';
+      },
+      // elapsedText is the wall-clock the finished run took.
+      elapsedText() {
+        if (!this.provStartMs) return '';
+        const end = this.provEndMs || this.nowMs;
+        const s = Math.round((end - this.provStartMs) / 1000);
+        return s > 0 ? 'done in ' + s + 's' : '';
+      },
+      // The provisioning step count is host-dependent and unknown in advance, so
+      // the bar runs off a smooth estimate that always keeps a little headroom and
+      // never overflows; it snaps to 100% only once the run is actually done.
+      provProgress() {
+        if (this.provisionDone && !this.provisionRunning) return 100;
+        const done = this.provisionResult.length;
+        const est = Math.max(20, done + 2);
+        return Math.min(96, Math.round((done / est) * 100));
+      },
+      // provSummary is a language-neutral ✓/!/✗ tally for the completed line,
+      // matching glyph() precedence (a not-ok step counts as an error even if it
+      // also set warn).
+      provSummary() {
+        const r = this.provisionResult;
+        const err = r.filter((s) => !s.ok).length;
+        const warn = r.filter((s) => s.ok && s.warn).length;
+        const ok = r.length - err - warn;
+        let out = '✓ ' + ok;
+        if (warn) out += '   ! ' + warn;
+        if (err) out += '   ✗ ' + err;
+        return out;
+      },
+      okCount() {
+        return this.provisionResult.filter((s) => s.ok).length;
+      },
+      // currentStep names what setup is doing right now — the most recent emitted
+      // step (steps stream as they complete, so the latest is the live activity).
+      currentStep() {
+        const n = this.provisionResult.length;
+        return n ? this.provisionResult[n - 1].name : '';
+      },
+      // toggleStep expands/collapses a single step's captured command log.
+      // No auto-scroll — expanding an earlier step shouldn't yank to the bottom.
+      toggleStep(i) {
+        this.$set(this.expanded, i, !this.expanded[i]);
+      },
+      headStateClass() {
+        if (this.provisionRunning) return 'head-running';
+        if (this.rebootRequired && this.runKind === 'setup') return 'head-warn';
+        if (this.provisionDone) return 'head-ok';
+        return 'head-idle';
+      },
+      headStateIcon() {
+        if (this.provisionRunning) return 'loading';
+        if (this.rebootRequired && this.runKind === 'setup') return 'warning';
+        if (this.provisionDone) return 'check';
+        return this.runKind === 'uninstall' ? 'delete' : 'thunderbolt';
+      },
+      consoleLabel() {
+        return this.runKind === 'uninstall'
+          ? '{{ i18n "pages.core.uninstallConsoleTitle" }}'
+          : '{{ i18n "pages.core.consoleTitle" }}';
+      },
+      provisionTitle() {
+        if (this.runKind === 'uninstall') {
+          if (this.provisionRunning) return '{{ i18n "pages.core.uninstallRunning" }}';
+          if (this.provisionDone) return '{{ i18n "pages.core.uninstallDone" }}';
+          return '{{ i18n "pages.core.uninstallCore" }}';
+        }
+        if (this.provisionRunning) return '{{ i18n "pages.core.setupRunning" }}';
+        if (this.rebootRequired) return '{{ i18n "pages.core.rebootTitle" }}';
+        if (this.provisionDone) return '{{ i18n "pages.core.setupDone" }}';
+        return '{{ i18n "pages.core.runSetup" }}';
+      },
+      // rebootNow asks the host to reboot, then shows a blocking overlay and waits
+      // for the panel to come back — the machine drops for ~a minute, so we probe
+      // with a bare fetch (no HttpUtil error toasts) and reload once it answers.
+      async rebootNow() {
+        const msg = await HttpUtil.post('/panel/core/reboot');
+        if (!msg || !msg.success) return;
+        this.rebooting = true;
+        this.provisionVisible = false;
+        clearTimeout(this.provTimer);
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+        this.watchReconnect();
+      },
+      watchReconnect() {
+        const url = this.basePath + 'panel/core/status';
+        const probe = () => {
+          fetch(url, { method: 'GET', cache: 'no-store' })
+            .then((r) => {
+              if (r.ok || r.status === 401 || r.status === 302) { location.reload(); }
+              else { this.reconnectTimer = setTimeout(probe, 5000); }
+            })
+            .catch(() => { this.reconnectTimer = setTimeout(probe, 5000); });
+        };
+        // Wait long enough for the box to actually go down before probing, so a
+        // reply from the still-up server doesn't trigger a premature reload.
+        this.reconnectTimer = setTimeout(probe, 20000);
+      },
+      coreTitle(name) {
+        return ({ xray: 'Xray', l2tp: 'L2TP', ipsec: 'IPsec', pptp: 'PPTP', openvpn: 'OpenVPN', openconnect: 'OpenConnect (cisco)', sstp: 'SSTP', ikev2: 'IKEv2', wgc: 'WireGuard (C)', awg: 'AmneziaWG', gre: 'GRE', mtproto: 'MTProto Proxy', ssh: 'SSH', radius: 'RADIUS' })[name] || name;
+      },
+      coreBackend(name) {
+        // The actual software powering each core (shown in the Backend row).
+        return ({ xray: 'Xray-core', l2tp: 'xl2tpd', ipsec: 'strongSwan (charon)', pptp: 'pptpd', openvpn: 'OpenVPN', openconnect: 'ocserv', sstp: 'accel-ppp', ikev2: 'strongSwan (charon)', wgc: 'WireGuard (kernel)', awg: 'AmneziaWG (kernel)', gre: 'GRE (kernel)', mtproto: 'telemt', ssh: 'Built-in (vpn-ui)', radius: 'Built-in (vpn-ui)' })[name] || '-';
+      },
+      coreIcon(name) {
+        // A single lock icon represents every core (Xray + all VPN daemons).
+        return 'lock';
+      },
+      stateText(state) {
+        return ({
+          running: '{{ i18n "pages.core.stateRunning" }}',
+          stopped: '{{ i18n "pages.core.stateStopped" }}',
+          idle: '{{ i18n "pages.core.stateIdle" }}',
+          not_installed: '{{ i18n "pages.core.stateNotInstalled" }}',
+          error: '{{ i18n "pages.core.stateError" }}',
+        })[state] || state;
+      },
+      // Nothing to restart or stop on a core this host was never set up for.
+      // These returned true unconditionally back when every card reported a live
+      // daemon state; ipsec and radius can now report not_installed too, and
+      // offering to restart a daemon that is not on disk only produces an error.
+      canStop(core) { return core.state !== 'not_installed'; },
+      canRestart(core) { return core.state !== 'not_installed'; },
+    },
+    computed: {
+      // The core's log, coloured by severity through the shared LogFormatter.
+      // Carries the core's own name as the per-line badge for the same reason
+      // the aggregated view does: a downloaded or copied line stays attributable.
+      logsHtml() {
+        if (!this.logsContent) {
+          return '<div class="log-empty">{{ i18n "pages.core.noLogs" }}</div>';
+        }
+        return LogFormatter.render([{ source: this.logsCore, text: this.logsContent }]);
+      },
+      // Rows the picker shows. Built-in cores are always excluded (nothing to
+      // install), and the uninstall mode lists only what is actually installed
+      // so it can never offer to remove something that is not there.
+      pickerCores() {
+        const rows = this.catalog.filter((c) => !c.builtin);
+        return this.pickerMode === 'uninstall' ? rows.filter((c) => c.installed) : rows;
+      },
+      pickerSelectableCount() {
+        return this.pickerCores.filter((c) => this.rowEnabled(c)).length;
+      },
+      pickedCount() {
+        return Object.keys(this.picked).length;
+      },
+      // The file the editor is currently on. An object rather than null when the
+      // list is empty, so the template can read .path/.format without guarding
+      // every access.
+      cfgTarget() {
+        return this.cfgTargets[this.cfgIndex] || {};
+      },
+      cfgHasOverride() {
+        return !!(this.cfgTarget && this.cfgTarget.override);
+      },
+      // Settled on zero targets: not mid-fetch (openConfig clears cfgTargets
+      // before loading, so a loading state must not read as "confirmed empty")
+      // and nothing came back. Drives the small dialog: width, the danger
+      // alert, and the empty message all key off this one flag.
+      cfgEmpty() {
+        return !this.cfgLoading && !this.cfgTargets.length;
+      },
+      cfgTitle() {
+        return this.coreTitle(this.cfgCore) + ' - {{ i18n "pages.core.configTitle" }}';
+      },
+    },
+    mounted() {
+      this.loadStatus(true);
+      this.loadCatalog();
+      this.pollTimer = setInterval(() => this.loadStatus(false), 5000);
+    },
+    beforeDestroy() {
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      clearTimeout(this.provTimer);
+      clearTimeout(this.reconnectTimer);
+    },
+  });
+</script>
+<style>
+  /* Equal-height core cards with actions pinned to the bottom */
+  .core-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .core-card .ant-card-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .core-actions {
+    margin-top: auto;
+    padding-top: 14px;
+  }
+
+  /* antd-vue 2.7's a-space is a no-wrap inline-flex, so the action buttons spill
+     past a narrow card on small viewports. Make it a full-width flex row that
+     wraps, with a row gap to match a-space's 8px horizontal spacing. */
+  .core-actions > .ant-space {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Key/value rows inside a core card */
+  .core-kv {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 2px;
+    font-size: 13px;
+  }
+
+  .core-kv + .core-kv {
+    border-top: 1px dashed rgba(128, 128, 128, 0.25);
+  }
+
+  .core-kv-label {
+    opacity: 0.6;
+  }
+
+  .core-kv-value {
+    font-weight: 500;
+  }
+
+  .core-value-ok {
+    color: #52c41a;
+  }
+
+  .core-value-warn {
+    color: #faad14;
+  }
+
+  /* Status pill in the card header */
+  .core-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    background: rgba(128, 128, 128, 0.12);
+    white-space: nowrap;
+  }
+
+  .core-state-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .core-state-running { color: #52c41a; }
+  .core-state-idle { color: #1890ff; }
+  .core-state-stopped { color: #faad14; }
+  .core-state-not_installed { color: #8c8c8c; }
+  .core-state-error { color: #f5222d; }
+
+  /* System / provisioning */
+  .system-desc {
+    opacity: 0.65;
+    margin-bottom: 14px;
+  }
+
+  .sys-tile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+  }
+
+  .sys-tile-ok {
+    border-color: rgba(82, 196, 26, 0.35);
+    background: rgba(82, 196, 26, 0.08);
+  }
+
+  .sys-tile-ok .sys-tile-icon {
+    color: #52c41a;
+  }
+
+  .sys-tile-bad {
+    border-color: rgba(245, 34, 45, 0.35);
+    background: rgba(245, 34, 45, 0.07);
+  }
+
+  .sys-tile-bad .sys-tile-icon {
+    color: #f5222d;
+  }
+
+  .sys-tile-icon {
+    font-size: 20px;
+  }
+
+  .sys-tile-name {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .sys-tile-state {
+    font-size: 12px;
+    opacity: 0.65;
+    text-transform: capitalize;
+  }
+
+  .sys-section-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-top: 18px;
+  }
+
+  .module-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .module-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    border: 1px solid;
+  }
+
+  .module-ok {
+    color: #52c41a;
+    border-color: rgba(82, 196, 26, 0.35);
+    background: rgba(82, 196, 26, 0.08);
+  }
+
+  .module-bad {
+    color: #f5222d;
+    border-color: rgba(245, 34, 45, 0.35);
+    background: rgba(245, 34, 45, 0.07);
+  }
+
+  .core-logs {
+    max-height: 60vh;
+    overflow: auto;
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(128, 128, 128, 0.1);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+
+  /* First-run hero shown until the backend is provisioned */
+  .setup-hero {
+    text-align: center;
+    padding: 40px 20px 34px;
+  }
+
+  .setup-hero-badge {
+    width: 76px;
+    height: 76px;
+    margin: 0 auto 20px;
+    border-radius: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    color: #fff;
+    background: linear-gradient(135deg, #1890ff, #52c41a);
+    box-shadow: 0 12px 30px rgba(24, 144, 255, 0.35);
+  }
+
+  .setup-hero-title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .setup-hero-desc {
+    max-width: 520px;
+    margin: 0 auto 22px;
+    opacity: 0.68;
+    line-height: 1.6;
+  }
+
+  .setup-hero-steps {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 26px;
+  }
+
+  .setup-hero-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    border: 1px solid rgba(128, 128, 128, 0.22);
+    background: rgba(128, 128, 128, 0.06);
+  }
+
+  .setup-hero-step .anticon {
+    color: #1890ff;
+  }
+
+  .setup-hero-btn {
+    min-width: 220px;
+    height: 46px;
+    font-size: 15px;
+    border-radius: 10px;
+  }
+
+  /* Setup modal header */
+  .setup-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .setup-modal-head-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex: 0 0 auto;
+  }
+
+  .setup-modal-head-icon.head-running,
+  .setup-modal-head-icon.head-idle {
+    background: rgba(24, 144, 255, 0.14);
+    color: #1890ff;
+  }
+
+  .setup-modal-head-icon.head-ok {
+    background: rgba(82, 196, 26, 0.15);
+    color: #52c41a;
+  }
+
+  .setup-modal-head-icon.head-warn {
+    background: rgba(250, 173, 20, 0.16);
+    color: #faad14;
+  }
+
+  .setup-modal-head-title {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .setup-modal-foot {
+    text-align: right;
+    margin-top: 16px;
+  }
+
+  /* Streaming terminal console — deliberately dark in both themes */
+  .term {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(0, 0, 0, 0.4);
+    background: #0d1117;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  }
+
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #161b22;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .term-bar-icon {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+  }
+
+  .term-bar-title {
+    flex: 1;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .term-count {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .term-progress {
+    height: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+
+  .term-progress-bar {
+    height: 100%;
+    width: 0;
+    background: #1890ff;
+    transition: width 0.4s ease;
+  }
+
+  .term-progress-bar.done { background: #27c93f; }
+  .term-progress-bar.warn { background: #faad14; }
+
+  .term-body {
+    max-height: 46vh;
+    overflow: auto;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #c9d1d9;
+  }
+
+  .term-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .term-ts { color: #6e7681; flex: 0 0 auto; }
+
+  .term-glyph {
+    flex: 0 0 auto;
+    width: 12px;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  .term-name { flex: 0 0 auto; color: #e6edf3; }
+  .term-msg { color: #8b949e; }
+
+  .term-ok .term-glyph { color: #3fb950; }
+  .term-warn .term-glyph { color: #d29922; }
+  .term-warn .term-msg { color: #d29922; }
+  .term-err .term-glyph { color: #f85149; }
+  .term-err .term-msg { color: #ff7b72; }
+  .term-running .term-glyph,
+  .term-running .term-name { color: #58a6ff; }
+
+  .term-clickable {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 1px 4px;
+    margin: 0 -4px;
+    transition: background 0.15s ease;
+  }
+
+  .term-clickable:hover {
+    background: rgba(88, 166, 255, 0.1);
+  }
+
+  .term-toggle {
+    color: #58a6ff;
+    font-size: 11px;
+    margin-left: 6px;
+    opacity: 0.8;
+  }
+
+  .term-steplog {
+    margin: 4px 0 8px 20px;
+    padding: 10px 12px;
+    max-height: 300px;
+    overflow: auto;
+    border-radius: 6px;
+    background: #010409;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #9da7b3;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .term-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 13px;
+    background: #58a6ff;
+    margin-left: 2px;
+    animation: term-blink 1s step-end infinite;
+  }
+
+  @keyframes term-blink { 50% { opacity: 0; } }
+
+  /* ---- setup provisioning console (scoped so shared WARP/systemd consoles,
+     which reuse .term-line/.term-name, are left alone) ------------------------ */
+  .term--setup .term-name { font-weight: 600; }
+  .term--setup .term-msg { flex: 1 1 auto; min-width: 0; }
+  .term--setup .term-ts { margin-left: auto; }   /* timestamp pinned to the right */
+
+  /* status footer: percent + ETA + current step (running), or tally + elapsed (done) */
+  .term-status {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
+    font-variant-numeric: tabular-nums;
+  }
+  .term-pct { color: #58a6ff; font-weight: 700; }
+  .term-cur { flex: 1 1 auto; min-width: 0; color: #58a6ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .term-status-done .term-summary { color: #c9d1d9; font-weight: 600; letter-spacing: .5px; }
+  .term-status-done .term-elapsed { color: #8b949e; }
+
+  /* Reboot-required explainer (inside the setup modal) */
+  .reboot-panel {
+    margin-top: 16px;
+    border: 1px solid rgba(250, 173, 20, 0.4);
+    background: rgba(250, 173, 20, 0.07);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .reboot-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .reboot-panel-icon { color: #faad14; font-size: 20px; }
+  .reboot-panel-title { font-weight: 600; font-size: 15px; }
+
+  .reboot-panel-what {
+    margin: 10px 0 14px;
+    opacity: 0.8;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+
+  .reboot-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .reboot-fact {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+
+  .reboot-fact-label {
+    opacity: 0.6;
+    flex: 0 0 auto;
+    min-width: 120px;
+  }
+
+  .reboot-fact-pkg,
+  .reboot-mod {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    padding: 1px 7px;
+    border-radius: 5px;
+    background: rgba(128, 128, 128, 0.18);
+  }
+
+  .reboot-mods {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .reboot-impact {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12.5px;
+    opacity: 0.75;
+    line-height: 1.5;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(128, 128, 128, 0.08);
+    margin-bottom: 14px;
+  }
+
+  .reboot-panel-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
+  /* Persistent page-level reboot banner */
+  .reboot-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    border: 1px solid rgba(250, 173, 20, 0.45);
+    background: rgba(250, 173, 20, 0.09);
+  }
+
+  .reboot-banner-icon { color: #faad14; font-size: 24px; flex: 0 0 auto; }
+  .reboot-banner-body { flex: 1 1 auto; min-width: 0; }
+  .reboot-banner-title { font-weight: 600; font-size: 14px; }
+
+  .reboot-banner-text {
+    opacity: 0.72;
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin-top: 2px;
+  }
+
+  .reboot-banner-actions {
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  @media (max-width: 640px) {
+    .reboot-banner { flex-wrap: wrap; }
+    .reboot-banner-actions { width: 100%; justify-content: flex-end; }
+  }
+
+  /* Rebooting overlay */
+  .rebooting-box {
+    text-align: center;
+    padding: 22px 10px 10px;
+  }
+
+  .rebooting-icon {
+    font-size: 40px;
+    color: #faad14;
+    margin-bottom: 14px;
+  }
+
+  .rebooting-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .rebooting-desc {
+    opacity: 0.7;
+    line-height: 1.6;
+    margin-bottom: 18px;
+  }
+
+  /* --- core picker -------------------------------------------------- */
+
+  .picker-desc {
+    opacity: 0.72;
+    line-height: 1.6;
+    margin: 0 0 14px;
+  }
+
+  .picker-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .picker-count {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.6;
+    font-size: 13px;
+  }
+
+  /* The list scrolls, not the dialog, so the confirm button stays reachable
+     however many cores the catalog grows to. */
+  .picker-list {
+    max-height: 46vh;
+    overflow-y: auto;
+    border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+    border-radius: 8px;
+  }
+
+  .picker-empty {
+    padding: 26px 14px;
+    text-align: center;
+    opacity: 0.6;
+  }
+
+  .picker-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 11px 14px;
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .picker-row + .picker-row {
+    border-top: 1px solid var(--border, rgba(128, 128, 128, 0.18));
+  }
+
+  .picker-row.is-checked {
+    background: var(--accent-weak, rgba(0, 135, 113, 0.1));
+  }
+
+  .picker-row.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .picker-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .picker-name {
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .picker-tag { margin: 0; }
+
+  .picker-sub {
+    font-size: 12.5px;
+    opacity: 0.68;
+    line-height: 1.5;
+  }
+
+  .picker-note {
+    font-size: 12px;
+    opacity: 0.8;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+  }
+
+  /* Warning-toned sibling of .picker-note: this one is about the operator's own
+     setup, not about the panel's, so it has to read differently at a glance. */
+  .picker-conflict {
+    font-size: 12px;
+    color: var(--warn);
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    margin-top: 2px;
+    line-height: 1.5;
+  }
+
+  .picker-backend {
+    font-size: 12px;
+    opacity: 0.55;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    padding-top: 2px;
+  }
+
+  @media (max-width: 640px) {
+    .picker-backend { display: none; }
+  }
+
+  .picker-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  /* What an uninstall kept, and for whom. */
+  .kept-panel {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  }
+
+  .kept-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .kept-list {
+    margin: 0;
+    padding-inline-start: 1.3em;
+    line-height: 1.7;
+    opacity: 0.8;
+    font-size: 13px;
+  }
+
+  /* --- advanced config editor -------------------------------------------
+     Every rule below is anchored on `.core-page~div`, NOT on `.core-page`.
+     A <style> block in this codebase is global, and an a-modal portals its
+     body out of #app to sit as a SIBLING of it, so a descendant selector off
+     the page class matches nothing inside the dialog. The sibling form is the
+     convention custom.css already uses for portaled content
+     (.index-page~div .log-container, .inbounds-page~div .ant-collapse). */
+  .core-page~div .cfg-field-label {
+    font-size: 12px;
+    opacity: 0.65;
+    margin-bottom: 4px;
+  }
+
+  /* The absolute path, so the operator can always see WHICH file this is
+     about; the picker only shows a short label. The dimming sits on the path
+     itself rather than the row, so the "overridden" tag beside it keeps its
+     own colour. */
+  .core-page~div .cfg-path {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .core-page~div .cfg-path-text {
+    font-family: monospace;
+    font-size: 12px;
+    opacity: 0.6;
+    word-break: break-all;
+  }
+
+  .core-page~div .cfg-empty {
+    padding: 28px 12px;
+    text-align: center;
+    opacity: 0.65;
+  }
+
+  /* Kept out of .cfg-empty itself so the acknowledgement button stays at full
+     opacity instead of inheriting the dimmed text above it. */
+  .core-page~div .cfg-empty-foot {
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  .core-page~div .cfg-editor {
+    margin-top: 14px;
+  }
+
+  /* CodeMirror sizes itself to its content by default, so the modal would grow
+     without bound on a long config. A fixed height with its own scrollbar keeps
+     the dialog the same shape whatever file is open. */
+  .core-page~div .cfg-editor .CodeMirror {
+    height: 52vh;
+    min-height: 280px;
+    border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  /* The xq theme underlines cm-def, which is fine for a language where "def" is a
+     definition but wrong for these configs. The properties (ini/conf) mode returns
+     state.position for every character it does not recognise, and that position is
+     "def" from start-of-line until the "=", so the token covers the leading
+     indentation and the alignment spaces before the separator as well as the key.
+     Underlined whitespace draws a solid rule through the blank columns, which reads
+     as a row of underscores rather than as an underlined key.
+
+     Colour instead: the key is the most important token in a config file, so it
+     still has to stand out, and cm-property is what the TOML mode already gives a
+     key. Matching it means a key looks the same whether the file open in this one
+     editor is an ini or a toml. */
+  .core-page~div .cfg-editor .cm-s-xq span.cm-def {
+    text-decoration: none;
+    color: #008771;
+  }
+
+  .dark .core-page~div .cfg-editor .cm-s-xq span.cm-def {
+    color: #f6c177;
+  }
+
+  .core-page~div .cfg-health {
+    margin: 10px 0;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid #ff4d4f;
+  }
+
+  .core-page~div .cfg-health-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #ff4d4f;
+  }
+
+  .core-page~div .cfg-health-log {
+    margin: 8px 0 0;
+    max-height: 180px;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .core-page~div .cfg-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  /* Pushes Close and Save to the far edge, keeping Reset at the other end so the
+     two are not adjacent. */
+  .core-page~div .cfg-foot-gap {
+    flex: 1 1 auto;
+  }
+</style>
+{{ template "page/body_end" .}}

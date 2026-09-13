@@ -1,0 +1,39 @@
+{{define "component/aSubBlock"}}
+<!-- Subscription QR + link, for the per-protocol config modals (WireGuard (C),
+     AmneziaWG, SSH). Those modals own the QR icon on their client row, so without this
+     block their accounts were the only ones whose QR icon did not lead to the
+     subscription, unlike every Xray protocol.
+
+     The dot is a per-modal id prefix: a-modal portals its body to the document root, so
+     `this.$el.querySelector` cannot reach these canvases and the ids have to be unique
+     across modals (the same reason the existing config QRs use document-level ids).
+
+     Expects the including Vue instance to expose: subId, subLink, subJsonLink (all
+     computed, empty when the sub server is off or the account has no subId) and copy(). -->
+<div v-if="subId" class="cfg-sub-block">
+  <div class="cfg-sub-head">
+    <b>{{ i18n "pages.settings.subSettings" }}</b>
+  </div>
+  <div class="cfg-sub-body">
+    <div class="cfg-sub-text">
+      <a-input :value="subLink" read-only
+        :style="{ fontFamily: 'monospace', fontSize: '12px' }">
+        <a-icon slot="addonAfter" type="copy" :style="{ cursor: 'pointer' }" @click="copy(subLink)"></a-icon>
+      </a-input>
+      <template v-if="subJsonLink">
+        <div :style="{ color: '#888', fontSize: '12px', margin: '12px 0 4px' }">
+          {{ i18n "pages.settings.subSettings" }} Json
+        </div>
+        <a-input :value="subJsonLink" read-only
+          :style="{ fontFamily: 'monospace', fontSize: '12px' }">
+          <a-icon slot="addonAfter" type="copy" :style="{ cursor: 'pointer' }" @click="copy(subJsonLink)"></a-icon>
+        </a-input>
+      </template>
+    </div>
+    <div class="cfg-sub-qr">
+      <canvas id="{{ . }}-sub-qr" @click="copy(subLink)"></canvas>
+      <canvas v-if="subJsonLink" id="{{ . }}-subjson-qr" @click="copy(subJsonLink)"></canvas>
+    </div>
+  </div>
+</div>
+{{end}}

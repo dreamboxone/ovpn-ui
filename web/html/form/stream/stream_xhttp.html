@@ -1,0 +1,425 @@
+{{define "form/streamXHTTP"}}
+<a-form
+  :colon="false"
+  :label-col="{ md: {span:8} }"
+  :wrapper-col="{ md: {span:14} }"
+>
+  <a-form-item label='{{ i18n "host" }}'>
+    <a-input v-model.trim="inbound.stream.xhttp.host"></a-input>
+  </a-form-item>
+  <a-form-item label='{{ i18n "path" }}'>
+    <a-input v-model.trim="inbound.stream.xhttp.path"></a-input>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.tcp.requestHeader" }}'>
+    <a-button
+      icon="plus"
+      size="small"
+      @click="inbound.stream.xhttp.addHeader('', '')"
+    ></a-button>
+  </a-form-item>
+  <!--
+    The core rejects a "host" header outright, in any casing: host is carried by
+    its own field above, and having it in two places would be ambiguous about
+    which one the client honours.
+  -->
+  <a-form-item
+    :wrapper-col="{span:24}"
+    :validate-status="inbound.stream.xhttp.hasHostHeader() ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.hasHostHeader()"
+        >{{ i18n "pages.inbounds.stream.xhttp.headersHost" }}</span
+      >
+    </template>
+    <a-input-group
+      compact
+      v-for="(header, index) in inbound.stream.xhttp.headers"
+    >
+      <a-input
+        :style="{ width: '50%' }"
+        v-model.trim="header.name"
+        placeholder='{{ i18n "pages.inbounds.stream.general.name"}}'
+      >
+        <template slot="addonBefore" :style="{ margin: '0' }"
+          >[[ index+1 ]]</template
+        >
+      </a-input>
+      <a-input
+        :style="{ width: '50%' }"
+        v-model.trim="header.value"
+        placeholder='{{ i18n "pages.inbounds.stream.general.value" }}'
+      >
+        <a-button
+          icon="minus"
+          slot="addonAfter"
+          size="small"
+          @click="inbound.stream.xhttp.removeHeader(index)"
+        ></a-button>
+      </a-input>
+    </a-input-group>
+  </a-form-item>
+  <a-form-item label="Mode">
+    <a-select
+      v-model="inbound.stream.xhttp.mode"
+      :style="{ width: '50%' }"
+      :dropdown-class-name="themeSwitcher.currentTheme"
+    >
+      <a-select-option v-for="key in MODE_OPTION" :value="key"
+        >[[ key ]]</a-select-option
+      >
+    </a-select>
+  </a-form-item>
+  <a-form-item
+    label="Max Buffered Upload"
+    v-if="inbound.stream.xhttp.mode === 'packet-up'"
+  >
+    <a-input-number
+      v-model.number="inbound.stream.xhttp.scMaxBufferedPosts"
+    ></a-input-number>
+  </a-form-item>
+  <a-form-item
+    label="Max Upload Size (Byte)"
+    v-if="inbound.stream.xhttp.mode === 'packet-up'"
+  >
+    <a-input v-model.trim="inbound.stream.xhttp.scMaxEachPostBytes"></a-input>
+  </a-form-item>
+  <a-form-item
+    label="Stream-Up Server"
+    v-if="inbound.stream.xhttp.mode === 'stream-up'"
+  >
+    <a-input v-model.trim="inbound.stream.xhttp.scStreamUpServerSecs"></a-input>
+  </a-form-item>
+  <!--
+    Padding cannot be half-disabled: once the range carries anything, the core
+    wants both ends above zero, and it refuses a range it cannot parse at all.
+    An all-zero range (which is what an empty field means to the core) is the
+    untouched case and stays legal.
+  -->
+  <a-form-item
+    label="Padding Bytes"
+    :validate-status="inbound.stream.xhttp.hasPaddingBytesProblem() ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.hasPaddingBytesProblem()"
+        >{{ i18n "pages.inbounds.stream.xhttp.paddingBytesInvalid" }}</span
+      >
+    </template>
+    <a-input v-model.trim="inbound.stream.xhttp.xPaddingBytes"></a-input>
+  </a-form-item>
+  <a-form-item label="Padding Obfs Mode">
+    <a-switch v-model="inbound.stream.xhttp.xPaddingObfsMode"></a-switch>
+  </a-form-item>
+  <template v-if="inbound.stream.xhttp.xPaddingObfsMode">
+    <a-form-item label="Padding Key">
+      <a-input
+        v-model.trim="inbound.stream.xhttp.xPaddingKey"
+        placeholder="x_padding"
+      ></a-input>
+    </a-form-item>
+    <a-form-item label="Padding Header">
+      <a-input
+        v-model.trim="inbound.stream.xhttp.xPaddingHeader"
+        placeholder="X-Padding"
+      ></a-input>
+    </a-form-item>
+    <a-form-item label="Padding Placement">
+      <a-select
+        v-model="inbound.stream.xhttp.xPaddingPlacement"
+        :dropdown-class-name="themeSwitcher.currentTheme"
+      >
+        <a-select-option value>Default (queryInHeader)</a-select-option>
+        <a-select-option value="queryInHeader">queryInHeader</a-select-option>
+        <a-select-option value="header">header</a-select-option>
+        <a-select-option value="cookie">cookie</a-select-option>
+        <a-select-option value="query">query</a-select-option>
+      </a-select>
+    </a-form-item>
+    <a-form-item label="Padding Method">
+      <a-select
+        v-model="inbound.stream.xhttp.xPaddingMethod"
+        :dropdown-class-name="themeSwitcher.currentTheme"
+      >
+        <a-select-option value>Default (repeat-x)</a-select-option>
+        <a-select-option value="repeat-x">repeat-x</a-select-option>
+        <a-select-option value="tokenish">tokenish</a-select-option>
+      </a-select>
+    </a-form-item>
+  </template>
+  <!--
+    GET carries the uplink in the query string, which only packet-up does, and
+    the core rejects the whole config for the combination rather than ignoring
+    it. This select is visible in every mode, so it carries its own error.
+  -->
+  <a-form-item
+    label="Uplink HTTP Method"
+    :validate-status="inbound.stream.xhttp.hasUplinkMethodProblem() ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.hasUplinkMethodProblem()"
+        >{{ i18n "pages.inbounds.stream.xhttp.uplinkMethodGetMode" }}</span
+      >
+    </template>
+    <a-select
+      v-model="inbound.stream.xhttp.uplinkHTTPMethod"
+      :dropdown-class-name="themeSwitcher.currentTheme"
+    >
+      <a-select-option value>Default (POST)</a-select-option>
+      <a-select-option value="POST">POST</a-select-option>
+      <a-select-option value="PUT">PUT</a-select-option>
+      <a-select-option value="GET">GET (packet-up only)</a-select-option>
+    </a-select>
+  </a-form-item>
+  <a-form-item label="Session Placement">
+    <a-select
+      v-model="inbound.stream.xhttp.sessionPlacement"
+      :dropdown-class-name="themeSwitcher.currentTheme"
+    >
+      <a-select-option value>Default (path)</a-select-option>
+      <a-select-option value="path">path</a-select-option>
+      <a-select-option value="header">header</a-select-option>
+      <a-select-option value="cookie">cookie</a-select-option>
+      <a-select-option value="query">query</a-select-option>
+    </a-select>
+  </a-form-item>
+  <a-form-item
+    label="Session Key"
+    v-if="inbound.stream.xhttp.sessionPlacement && inbound.stream.xhttp.sessionPlacement !== 'path'"
+  >
+    <a-input
+      v-model.trim="inbound.stream.xhttp.sessionKey"
+      placeholder="x_session"
+    ></a-input>
+  </a-form-item>
+  <a-form-item label="Sequence Placement">
+    <a-select
+      v-model="inbound.stream.xhttp.seqPlacement"
+      :dropdown-class-name="themeSwitcher.currentTheme"
+    >
+      <a-select-option value>Default (path)</a-select-option>
+      <a-select-option value="path">path</a-select-option>
+      <a-select-option value="header">header</a-select-option>
+      <a-select-option value="cookie">cookie</a-select-option>
+      <a-select-option value="query">query</a-select-option>
+    </a-select>
+  </a-form-item>
+  <a-form-item
+    label="Sequence Key"
+    v-if="inbound.stream.xhttp.seqPlacement && inbound.stream.xhttp.seqPlacement !== 'path'"
+  >
+    <a-input
+      v-model.trim="inbound.stream.xhttp.seqKey"
+      placeholder="x_seq"
+    ></a-input>
+  </a-form-item>
+  <!--
+    Only body, header and cookie exist for this one. "query" was offered here
+    before and is NOT a placement the transport takes in any mode: the core
+    answers "unsupported uplink data placement: query" and refuses the config,
+    so an inbound saved with it never started. The validator below still checks
+    for it, because an inbound saved back then is still carrying it.
+  -->
+  <a-form-item
+    label="Uplink Data Placement"
+    v-if="inbound.stream.xhttp.mode === 'packet-up'"
+    :validate-status="inbound.stream.xhttp.uplinkDataPlacementProblem() ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.uplinkDataPlacementProblem()"
+        >{{ i18n "pages.inbounds.stream.xhttp.uplinkDataPlacementUnsupported" }}</span
+      >
+    </template>
+    <a-select
+      v-model="inbound.stream.xhttp.uplinkDataPlacement"
+      :dropdown-class-name="themeSwitcher.currentTheme"
+    >
+      <a-select-option value>Default (body)</a-select-option>
+      <a-select-option value="body">body</a-select-option>
+      <a-select-option value="header">header</a-select-option>
+      <a-select-option value="cookie">cookie</a-select-option>
+    </a-select>
+  </a-form-item>
+  <!--
+    Outside packet-up the control above is hidden, so a placement left behind by
+    a mode change would block the save with nothing on screen to explain it.
+    Surface it here with a button to drop it, the same way the stream-one
+    downloadSettings case is handled further down.
+  -->
+  <a-form-item
+    v-else-if="inbound.stream.xhttp.hasHiddenUplinkProblem()"
+    label="Uplink Data Placement"
+    validate-status="error"
+  >
+    <template slot="help"
+      >{{ i18n "pages.inbounds.stream.xhttp.uplinkDataPlacementMode" }}</template
+    >
+    <a-button
+      icon="delete"
+      size="small"
+      @click="inbound.stream.xhttp.clearUplinkDataPlacement()"
+      >{{ i18n "reset" }}</a-button
+    >
+  </a-form-item>
+  <a-form-item
+    label="Uplink Data Key"
+    v-if="inbound.stream.xhttp.mode === 'packet-up' && inbound.stream.xhttp.uplinkDataPlacement && inbound.stream.xhttp.uplinkDataPlacement !== 'body'"
+  >
+    <a-input
+      v-model.trim="inbound.stream.xhttp.uplinkDataKey"
+      placeholder="x_data"
+    ></a-input>
+  </a-form-item>
+  <a-form-item
+    label="Uplink Chunk Size"
+    v-if="inbound.stream.xhttp.mode === 'packet-up' && inbound.stream.xhttp.uplinkDataPlacement && inbound.stream.xhttp.uplinkDataPlacement !== 'body'"
+  >
+    <a-input-number
+      v-model.number="inbound.stream.xhttp.uplinkChunkSize"
+      :min="0"
+      placeholder="0 (unlimited)"
+    ></a-input-number>
+  </a-form-item>
+  <a-form-item label="No SSE Header">
+    <a-switch v-model="inbound.stream.xhttp.noSSEHeader"></a-switch>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.xhttp.noGRPCHeader" }}'>
+    <a-switch v-model="inbound.stream.xhttp.noGRPCHeader"></a-switch>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.xhttp.scMinPostsIntervalMs" }}'>
+    <a-input
+      v-model.trim="inbound.stream.xhttp.scMinPostsIntervalMs"
+      placeholder="30"
+    ></a-input>
+  </a-form-item>
+  <!--
+    :min="0" keeps the control itself out of trouble; the error state is for a
+    negative value that arrived from an imported or hand-edited blob, which the
+    core rejects with "invalid negative value of maxHeaderBytes".
+  -->
+  <a-form-item
+    label='{{ i18n "pages.inbounds.stream.xhttp.serverMaxHeaderBytes" }}'
+    :validate-status="inbound.stream.xhttp.hasServerMaxHeaderBytesProblem() ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.hasServerMaxHeaderBytesProblem()"
+        >{{ i18n "pages.inbounds.stream.xhttp.serverMaxHeaderBytesNegative" }}</span
+      >
+    </template>
+    <a-input-number
+      v-model.number="inbound.stream.xhttp.serverMaxHeaderBytes"
+      :min="0"
+      placeholder="0"
+    ></a-input-number>
+  </a-form-item>
+  <div class="bo-if-sub">{{ i18n "pages.inbounds.stream.xhttp.xmux" }}</div>
+  <!--
+    maxConcurrency and maxConnections are two different multiplexing strategies
+    and the core rejects a config that sets both
+    (third_party/Xray-core/infra/conf/transport_internet.go: `maxConnections
+    cannot be specified together with maxConcurrency`). It rejects the whole
+    config, so saving that pair would stop xray from starting. Flag it on both
+    controls and block the save (modalFormValid in modals/inbound_modal.html).
+  -->
+  <a-form-item
+    label='{{ i18n "pages.inbounds.stream.xhttp.xmuxMaxConcurrency" }}'
+    :validate-status="inbound.stream.xhttp.hasXmuxConflict() ? 'error' : ''"
+  >
+    <a-input
+      v-model.trim="inbound.stream.xhttp.xmux.maxConcurrency"
+      placeholder="16-32"
+    ></a-input>
+  </a-form-item>
+  <a-form-item
+    label='{{ i18n "pages.inbounds.stream.xhttp.xmuxMaxConnections" }}'
+    :validate-status="inbound.stream.xhttp.hasXmuxConflict() ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.hasXmuxConflict()"
+        >{{ i18n "pages.inbounds.stream.xhttp.xmuxConflict" }}</span
+      >
+    </template>
+    <a-input-number
+      v-model.number="inbound.stream.xhttp.xmux.maxConnections"
+      :min="0"
+      placeholder="0"
+    ></a-input-number>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.xhttp.xmuxCMaxReuseTimes" }}'>
+    <a-input-number
+      v-model.number="inbound.stream.xhttp.xmux.cMaxReuseTimes"
+      :min="0"
+      placeholder="0"
+    ></a-input-number>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.xhttp.xmuxHMaxRequestTimes" }}'>
+    <a-input
+      v-model.trim="inbound.stream.xhttp.xmux.hMaxRequestTimes"
+      placeholder="600-900"
+    ></a-input>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.xhttp.xmuxHMaxReusableSecs" }}'>
+    <a-input
+      v-model.trim="inbound.stream.xhttp.xmux.hMaxReusableSecs"
+      placeholder="1800-3000"
+    ></a-input>
+  </a-form-item>
+  <a-form-item label='{{ i18n "pages.inbounds.stream.xhttp.xmuxHKeepAlivePeriod" }}'>
+    <a-input-number
+      v-model.number="inbound.stream.xhttp.xmux.hKeepAlivePeriod"
+      :min="0"
+      placeholder="0"
+    ></a-input-number>
+  </a-form-item>
+  <div class="bo-if-sub">{{ i18n "pages.inbounds.stream.xhttp.downloadSettings" }}</div>
+  <!--
+    downloadSettings is a whole nested stream-settings object: it is how the
+    client is told to pull the downlink over a different transport or endpoint.
+    Editing it as raw JSON rather than as a second copy of every transport form
+    keeps it round-tripping verbatim. An empty box means the key is omitted
+    entirely, and anything that does not parse blocks the save (modalFormValid
+    in modals/inbound_modal.html) instead of being dropped on the floor.
+  -->
+  <a-form-item
+    v-if="inbound.stream.xhttp.mode !== 'stream-one'"
+    :wrapper-col="{ span: 24 }"
+    :validate-status="inbound.stream.xhttp.downloadSettingsError ? 'error' : ''"
+  >
+    <template slot="help">
+      <span v-if="inbound.stream.xhttp.downloadSettingsError"
+        >{{ i18n "pages.inbounds.stream.xhttp.downloadSettingsInvalid" }} [[
+        inbound.stream.xhttp.downloadSettingsError ]]</span
+      >
+      <span v-else
+        >{{ i18n "pages.inbounds.stream.xhttp.downloadSettingsDesc" }}</span
+      >
+    </template>
+    <a-textarea
+      v-model="inbound.stream.xhttp.downloadSettingsText"
+      :auto-size="{ minRows: 4, maxRows: 14 }"
+      placeholder='{ "network": "xhttp", "security": "tls", "xhttpSettings": { "path": "/dl" } }'
+    ></a-textarea>
+  </a-form-item>
+  <!--
+    stream-one is the one mode where the core refuses downloadSettings outright
+    (third_party/Xray-core/infra/conf/transport_internet.go: `Can not use
+    "downloadSettings" in "stream-one" mode.`) and refuses the whole config with
+    it, so the editor is hidden here. A value carried over from another mode is
+    not silently dropped though: it is surfaced as an error with a button to
+    clear it, and the save stays blocked until it is gone.
+  -->
+  <a-form-item
+    v-else-if="inbound.stream.xhttp.downloadSettingsText"
+    :wrapper-col="{ span: 24 }"
+    validate-status="error"
+  >
+    <template slot="help"
+      >{{ i18n "pages.inbounds.stream.xhttp.downloadSettingsStreamOne" }}</template
+    >
+    <a-button
+      icon="delete"
+      size="small"
+      @click="inbound.stream.xhttp.clearDownloadSettings()"
+      >{{ i18n "reset" }}</a-button
+    >
+  </a-form-item>
+</a-form>
+{{end}}

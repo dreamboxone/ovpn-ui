@@ -1,0 +1,150 @@
+name: OpenWrt packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish the packages to this release tag (empty = build only)"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - "packaging/openwrt/**"
+      - "backend/**"
+      - "corebundle/**"
+      - "config/**"
+      - "database/**"
+      - "web/**"
+      - "xray/**"
+      - "sub/**"
+      - "main.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/openwrt-apk.yml"
+
+permissions:
+  contents: write
+
+env:
+  OPENWRT_VERSION: "25.12.5"
+  ZIG_VERSION: "0.13.0"
+
+jobs:
+  binary:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [arm, arm64, amd64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install zig
+        run: |
+          curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-linux-x86_64-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Build static binary
+        run: bash packaging/openwrt/build-binary.sh ${{ matrix.goarch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goarch }}
+          path: build/out/openwrt/ovpn-ui-${{ matrix.goarch }}
+          retention-days: 3
+
+  package:
+    needs: binary
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # One job per OpenWrt package architecture: the SDK spends several minutes per
+      # package re-packing the kmod dependencies, so a serial run takes most of an hour.
+      matrix:
+        include:
+          - { goarch: arm, pkgarch: arm_cortex-a7_neon-vfpv4 }
+          - { goarch: arm, pkgarch: arm_cortex-a7_vfpv4 }
+          - { goarch: arm, pkgarch: arm_cortex-a9_vfpv3-d16 }
+          - { goarch: arm, pkgarch: arm_cortex-a9_neon }
+          - { goarch: arm, pkgarch: arm_cortex-a15_neon-vfpv4 }
+          - { goarch: arm, pkgarch: arm_cortex-a8_vfpv3 }
+          - { goarch: arm, pkgarch: arm_cortex-a5_vfpv4 }
+          - { goarch: arm64, pkgarch: aarch64_cortex-a53 }
+          - { goarch: arm64, pkgarch: aarch64_cortex-a72 }
+          - { goarch: arm64, pkgarch: aarch64_cortex-a76 }
+          - { goarch: arm64, pkgarch: aarch64_generic }
+          - { goarch: amd64, pkgarch: x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.goarch }}
+          path: build/out/openwrt
+
+      - uses: actions/cache@v4
+        with:
+          path: sdk.tar.zst
+          key: openwrt-sdk-x86-64-${{ env.OPENWRT_VERSION }}
+
+      - name: Fetch the OpenWrt SDK
+        run: |
+          base="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/x86/64"
+          name="$(curl -fsSL "$base/sha256sums" | awk '/openwrt-sdk-.*\.tar\.zst$/ {sub(/^\*/, "", $2); print $2}')"
+          [ -s sdk.tar.zst ] || curl -fsSL -o sdk.tar.zst "$base/$name"
+          curl -fsSL "$base/sha256sums" | awk -v n="$name" '{f=$2; sub(/^\*/, "", f)} f == n {print $1 "  sdk.tar.zst"}' | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/sdk"
+          tar --zstd -xf sdk.tar.zst -C "$RUNNER_TEMP/sdk" --strip-components=1
+
+      - name: Build package
+        env:
+          OVPNUI_PKGARCHES: ${{ matrix.pkgarch }}
+        run: |
+          chmod 0755 build/out/openwrt/ovpn-ui-*
+          bash packaging/openwrt/make-apk.sh "$RUNNER_TEMP/sdk" ${{ matrix.goarch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ matrix.pkgarch }}
+          path: build/out/openwrt/dist/ovpn-ui-${{ matrix.pkgarch }}.apk
+          retention-days: 7
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: apk-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums and installer
+        run: |
+          cp packaging/openwrt/install.sh dist/install.sh
+          cd dist && sha256sum ovpn-ui-*.apk > sha256sums && cat sha256sums
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-packages
+          path: dist/*
+
+      - name: Publish to release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --notes "OpenWrt 25.12+ packages. Install on the router with: wget -qO- https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/install.sh | OVPNUI_TAG=$TAG sh"
+          gh release upload "$TAG" dist/* --clobber

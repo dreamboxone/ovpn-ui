@@ -1,0 +1,2169 @@
+{{ template "page/head_start" .}}
+<link rel="stylesheet"
+  href="{{ .base_path }}assets/codemirror/codemirror.min.css?{{ .asset_ver }}">
+<link rel="stylesheet"
+  href="{{ .base_path }}assets/codemirror/fold/foldgutter.css">
+<link rel="stylesheet"
+  href="{{ .base_path }}assets/codemirror/xq.min.css?{{ .asset_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/lint/lint.css">
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+{{template "page/shell_start" . }}
+      <a-spin :spinning="loadingStates.spinning" :delay="500"
+        tip='{{ i18n "loading"}}' size="large">
+        <transition name="list" appear>
+          <a-alert type="error" v-if="showAlert && loadingStates.fetched"
+            :style="{ marginBottom: '10px' }"
+            message='{{ i18n "secAlertTitle" }}' color="red" show-icon closable>
+            <template slot="description">
+              <div>{{ i18n "secAlertSsl" }}</div>
+              <a-button class="sec-alert-dismiss" size="small" @click="dismissSecAlert">{{ i18n "secAlertDismiss" }}</a-button>
+            </template>
+          </a-alert>
+        </transition>
+        <transition name="list" appear>
+          <a-row v-if="!loadingStates.fetched">
+            <div :style="{ minHeight: 'calc(100vh - 120px)' }"></div>
+          </a-row>
+          <a-row :gutter="[isMobile ? 8 : 16, isMobile ? 0 : 12]" v-else>
+            <a-col>
+              <a-card hoverable>
+                <a-row
+                  :style="{ display: 'flex', flexWrap: 'wrap', alignItems: 'center' }">
+                  <a-col :xs="24" :sm="10" :style="{ padding: '4px' }">
+                    <a-space direction="horizontal">
+                      <a-button type="primary" :disabled="saveBtnDisable"
+                        @click="updateXraySetting">
+                        {{ i18n "pages.xray.save" }}
+                      </a-button>
+                      <a-button type="danger" :disabled="!saveBtnDisable"
+                        @click="restartXray">
+                        {{ i18n "pages.xray.restart" }}
+                      </a-button>
+                      <a-popover v-if="restartResult"
+                        :overlay-class-name="themeSwitcher.currentTheme">
+                        <span slot="title">{{ i18n
+                          "pages.index.xrayErrorPopoverTitle" }}</span>
+                        <template slot="content">
+                          <span :style="{ maxWidth: '400px' }"
+                            v-for="line in restartResult.split('\n')">[[ line
+                            ]]</span>
+                        </template>
+                        <a-icon type="question-circle"></a-icon>
+                      </a-popover>
+                    </a-space>
+                  </a-col>
+                  <a-col :xs="24" :sm="14">
+                    <template>
+                      <div>
+                        <a-back-top
+                          :target="() => document.querySelector('.bo-main')"
+                          visibility-height="200"></a-back-top>
+                        <a-alert type="warning"
+                          :style="{ float: 'right', width: 'fit-content' }"
+                          message='{{ i18n "pages.settings.infoDesc" }}'
+                          show-icon>
+                        </a-alert>
+                      </div>
+                    </template>
+                  </a-col>
+                </a-row>
+              </a-card>
+            </a-col>
+            <a-col>
+              {{/*
+                The section tree. Each entry below is one of the a-tab-panes this
+                replaced, with its key, its icon and its label unchanged. The
+                panes that carried force-render="true" are listed to
+                initSections() instead, because that is what the attribute meant:
+                be in the document from first paint. Two of them are read by id
+                (changeCode reaches for #xraySetting, changeObsCode for
+                #obsSetting), so they cannot wait to be opened.
+
+                The second level is not written here: SectionNavMixin reads it
+                back out of each section's rendered a-collapse headers. Only
+                Basics and DNS have any; the rest are tables and an editor.
+              */}}
+              <div class="bo-secnav-layout">
+                <nav class="bo-secnav" aria-label='{{ i18n "menu.xray"}}'>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-basic' }"
+                      :aria-current="sectionKey === 'tpl-basic'"
+                      @click="selectSection('tpl-basic')">
+                      <a-icon type="setting"></a-icon>
+                      <span class="bo-secnav-label">{{ i18n "pages.xray.basicTemplate"}}</span>
+                      <a-icon type="right" class="bo-secnav-chev"></a-icon>
+                    </button>
+                    <div class="bo-secnav-subs" v-if="sectionKey === 'tpl-basic'">
+                      <button type="button" class="bo-secnav-sub" v-for="s in sectionSubList" :key="s.i"
+                        :class="{ 'is-active': sectionSub === String(s.i) }"
+                        @click="gotoSectionSub(s.i)" v-text="s.label"></button>
+                    </div>
+                  </div>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-routing' }"
+                      :aria-current="sectionKey === 'tpl-routing'"
+                      @click="selectSection('tpl-routing')">
+                      <a-icon type="swap"></a-icon>
+                      <span class="bo-secnav-label">{{ i18n "pages.xray.Routings"}}</span>
+                    </button>
+                  </div>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-outbound' }"
+                      :aria-current="sectionKey === 'tpl-outbound'"
+                      @click="selectSection('tpl-outbound')">
+                      <a-icon type="upload"></a-icon>
+                      <span class="bo-secnav-label">{{ i18n "pages.xray.Outbounds"}}</span>
+                    </button>
+                  </div>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-reverse' }"
+                      :aria-current="sectionKey === 'tpl-reverse'"
+                      @click="selectSection('tpl-reverse')">
+                      <a-icon type="import"></a-icon>
+                      <span class="bo-secnav-label">{{ i18n "pages.xray.outbound.reverse"}}</span>
+                    </button>
+                  </div>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-balancer' }"
+                      :aria-current="sectionKey === 'tpl-balancer'"
+                      @click="selectSection('tpl-balancer')">
+                      <a-icon type="cluster"></a-icon>
+                      <span class="bo-secnav-label">{{ i18n "pages.xray.Balancers"}}</span>
+                    </button>
+                  </div>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-dns' }"
+                      :aria-current="sectionKey === 'tpl-dns'"
+                      @click="selectSection('tpl-dns')">
+                      <a-icon type="database"></a-icon>
+                      <span class="bo-secnav-label">DNS</span>
+                      <a-icon type="right" class="bo-secnav-chev"></a-icon>
+                    </button>
+                    <div class="bo-secnav-subs" v-if="sectionKey === 'tpl-dns'">
+                      <button type="button" class="bo-secnav-sub" v-for="s in sectionSubList" :key="s.i"
+                        :class="{ 'is-active': sectionSub === String(s.i) }"
+                        @click="gotoSectionSub(s.i)" v-text="s.label"></button>
+                    </div>
+                  </div>
+                  <div>
+                    <button type="button" class="bo-secnav-sec" :class="{ 'is-open': sectionKey === 'tpl-advanced' }"
+                      :aria-current="sectionKey === 'tpl-advanced'"
+                      @click="selectSection('tpl-advanced')">
+                      <a-icon type="code"></a-icon>
+                      <span class="bo-secnav-label">{{ i18n "pages.xray.advancedTemplate"}}</span>
+                    </button>
+                  </div>
+                </nav>
+                <div class="bo-secpanes">
+                  <div v-if="sectionMounted['tpl-basic']" v-show="sectionKey === 'tpl-basic'" data-section="tpl-basic" :style="{ paddingTop: '20px' }">
+                    {{ template "settings/xray/basics" . }}
+                  </div>
+                  <div v-if="sectionMounted['tpl-routing']" v-show="sectionKey === 'tpl-routing'" data-section="tpl-routing" :style="{ paddingTop: '20px' }">
+                    {{ template "settings/xray/routing" . }}
+                  </div>
+                  <div v-if="sectionMounted['tpl-outbound']" v-show="sectionKey === 'tpl-outbound'" data-section="tpl-outbound">
+                    {{ template "settings/xray/outbounds" . }}
+                  </div>
+                  <div v-if="sectionMounted['tpl-reverse']" v-show="sectionKey === 'tpl-reverse'" data-section="tpl-reverse" :style="{ paddingTop: '20px' }">
+                    {{ template "settings/xray/reverse" . }}
+                  </div>
+                  <div v-if="sectionMounted['tpl-balancer']" v-show="sectionKey === 'tpl-balancer'" data-section="tpl-balancer" :style="{ paddingTop: '20px' }">
+                    {{ template "settings/xray/balancers" . }}
+                  </div>
+                  <div v-if="sectionMounted['tpl-dns']" v-show="sectionKey === 'tpl-dns'" data-section="tpl-dns" :style="{ paddingTop: '20px' }">
+                    {{ template "settings/xray/dns" . }}
+                  </div>
+                  <div v-if="sectionMounted['tpl-advanced']" v-show="sectionKey === 'tpl-advanced'" data-section="tpl-advanced">
+                    {{ template "settings/xray/advanced" . }}
+                  </div>
+                </div>
+              </div>
+            </a-col>
+          </a-row>
+        </transition>
+      </a-spin>
+{{template "page/shell_end" . }}
+{{template "page/body_scripts" .}}
+<script
+  src="{{ .base_path }}assets/js/model/outbound.js?{{ .asset_ver }}"></script>
+<script
+  src="{{ .base_path }}assets/js/util/section-nav.js?{{ .asset_ver }}"></script>
+<script
+  src="{{ .base_path }}assets/codemirror/codemirror.min.js?{{ .asset_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/javascript.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jshint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jsonlint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/lint.js"></script>
+<script
+  src="{{ .base_path }}assets/codemirror/lint/javascript-lint.js"></script>
+<script
+  src="{{ .base_path }}assets/codemirror/hint/javascript-hint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldcode.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldgutter.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/brace-fold.js"></script>
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "component/aTableSortable" .}}
+{{template "component/aSettingListItem" .}}
+{{template "modals/ruleModal"}}
+{{template "modals/outModal"}}
+{{template "modals/reverseModal"}}
+{{template "modals/balancerModal"}}
+{{template "modals/dnsModal"}}
+{{template "modals/dnsPresetsModal"}}
+{{template "modals/fakednsModal"}}
+{{template "modals/warpModal"}}
+{{template "modals/warpSocksModal"}}
+{{template "modals/nordModal"}}
+<script>
+  const rulesColumns = [
+    { title: "#", align: 'center', width: 15, scopedSlots: { customRender: 'action' } },
+    {
+      title: '{{ i18n "pages.xray.rules.source"}}', children: [
+        { title: 'IP', dataIndex: "sourceIP", align: 'center', width: 20, ellipsis: true },
+        { title: '{{ i18n "pages.inbounds.port" }}', dataIndex: 'sourcePort', align: 'center', width: 10, ellipsis: true },
+        { title: 'VLESS Route', dataIndex: 'vlessRoute', align: 'center', width: 15, ellipsis: true }]
+    },
+    {
+      title: '{{ i18n "pages.inbounds.network"}}', children: [
+        { title: 'L4', dataIndex: 'network', align: 'center', width: 10 },
+        { title: '{{ i18n "protocol" }}', dataIndex: 'protocol', align: 'center', width: 15, ellipsis: true },
+        { title: 'Attrs', dataIndex: 'attrs', align: 'center', width: 10, ellipsis: true }]
+    },
+    {
+      title: '{{ i18n "pages.xray.rules.dest"}}', children: [
+        { title: 'IP', dataIndex: 'ip', align: 'center', width: 20, ellipsis: true },
+        { title: '{{ i18n "pages.xray.outbound.domain" }}', dataIndex: 'domain', align: 'center', width: 20, ellipsis: true },
+        { title: '{{ i18n "pages.inbounds.port" }}', dataIndex: 'port', align: 'center', width: 10, ellipsis: true }]
+    },
+    {
+      title: '{{ i18n "pages.xray.rules.inbound"}}', children: [
+        { title: '{{ i18n "pages.xray.outbound.tag" }}', dataIndex: 'inboundTag', align: 'center', width: 15, ellipsis: true },
+        { title: '{{ i18n "pages.inbounds.client" }}', dataIndex: 'user', align: 'center', width: 20, ellipsis: true }]
+    },
+    { title: '{{ i18n "pages.xray.rules.outbound"}}', dataIndex: 'outboundTag', align: 'center', width: 17 },
+    { title: '{{ i18n "pages.xray.rules.balancer"}}', dataIndex: 'balancerTag', align: 'center', width: 15 },
+  ];
+
+  const rulesMobileColumns = [
+    { title: "#", align: 'center', width: 20, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xray.rules.inbound"}}', align: 'center', width: 50, ellipsis: true, scopedSlots: { customRender: 'inbound' } },
+    { title: '{{ i18n "pages.xray.rules.outbound"}}', align: 'center', width: 50, ellipsis: true, scopedSlots: { customRender: 'outbound' } },
+    { title: '{{ i18n "pages.xray.rules.info"}}', align: 'center', width: 50, ellipsis: true, scopedSlots: { customRender: 'info' } },
+  ];
+
+  const outboundColumns = [
+    { title: "#", align: 'center', width: 60, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xray.outbound.tag"}}', dataIndex: 'tag', align: 'center', width: 50 },
+    { title: '{{ i18n "protocol"}}', align: 'center', width: 50, scopedSlots: { customRender: 'protocol' } },
+    { title: '{{ i18n "pages.xray.outbound.address"}}', align: 'center', width: 50, scopedSlots: { customRender: 'address' } },
+    { title: '{{ i18n "pages.inbounds.traffic" }}', align: 'center', width: 50, scopedSlots: { customRender: 'traffic' } },
+    { title: '{{ i18n "pages.xray.outbound.testResult" }}', align: 'center', width: 200, scopedSlots: { customRender: 'testResult' } },
+    { title: '{{ i18n "pages.xray.outbound.test" }}', align: 'center', width: 60, scopedSlots: { customRender: 'test' } },
+  ];
+
+  const reverseColumns = [
+    { title: "#", align: 'center', width: 20, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xray.outbound.type"}}', dataIndex: 'type', align: 'center', width: 50 },
+    { title: '{{ i18n "pages.xray.outbound.tag"}}', dataIndex: 'tag', align: 'center', width: 50 },
+    { title: '{{ i18n "pages.xray.outbound.domain"}}', dataIndex: 'domain', align: 'center', width: 50 },
+  ];
+
+  const balancerColumns = [
+    { title: "#", align: 'center', width: 20, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xray.balancer.tag"}}', dataIndex: 'tag', align: 'center', width: 50 },
+    { title: '{{ i18n "pages.xray.balancer.balancerStrategy"}}', align: 'center', width: 50, scopedSlots: { customRender: 'strategy' } },
+    { title: '{{ i18n "pages.xray.balancer.balancerSelectors"}}', align: 'center', width: 100, scopedSlots: { customRender: 'selector' } },
+  ];
+
+  const dnsColumns = [
+    { title: "#", align: 'center', width: 20, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xray.outbound.address"}}', align: 'center', width: 50, scopedSlots: { customRender: 'address' } },
+    { title: '{{ i18n "pages.xray.dns.domains"}}', align: 'center', width: 50, scopedSlots: { customRender: 'domain' } },
+    { title: '{{ i18n "pages.xray.dns.expectIPs"}}', align: 'center', width: 50, scopedSlots: { customRender: 'expectIPs' } },
+  ];
+
+  const fakednsColumns = [
+    { title: "#", align: 'center', width: 20, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xray.fakedns.ipPool"}}', dataIndex: 'ipPool', align: 'center', width: 50 },
+    { title: '{{ i18n "pages.xray.fakedns.poolSize"}}', dataIndex: 'poolSize', align: 'center', width: 50 },
+  ];
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    mixins: [MediaQueryMixin, SectionNavMixin],
+    el: '#app',
+    data: {
+      themeSwitcher,
+      pageTitle: '{{ i18n "menu.xray"}}',
+      pageClass: 'xray-page',
+      isDarkTheme: themeSwitcher.isDarkTheme,
+      loadingStates: {
+        fetched: false,
+        spinning: false
+      },
+      oldXraySetting: '',
+      xraySetting: '',
+      outboundTestUrl: 'https://www.google.com/generate_204',
+      oldOutboundTestUrl: 'https://www.google.com/generate_204',
+      inboundTags: [],
+      // Tags of the SSH tunnels the panel manages. What lands in the Xray config
+      // for one of these is a `socks` outbound (Xray core has no ssh outbound),
+      // so this is the only way to tell an SSH outbound apart from a real socks
+      // one and label it honestly in the table.
+      sshOutboundTags: [],
+      // The same tunnels keyed by tag, settings included. Edit rebuilds the SSH
+      // form out of this, because the row it opens from is a socks outbound and
+      // carries none of the tunnel (see sshOutboundModel).
+      sshOutbounds: {},
+      // The client VPN tunnels the panel manages, keyed by tag. Same problem as
+      // the SSH tags and one step worse: a VPN tunnel lands in the config as a
+      // freedom outbound, which is also what a plain direct outbound is, so
+      // without this list a tunnel and `direct` are indistinguishable in the
+      // table. It also carries the settings that Edit re-opens the tunnel form
+      // with, since the config copy no longer holds them.
+      vpnOutbounds: {},
+      // tag -> {up, detail} from the last status sweep.
+      vpnOutboundStatus: {},
+      // What /vpnoutbound/kinds reports: [{kind, available, why}], one per
+      // registered driver, sorted. null means the question could not be asked.
+      vpnOutKindList: null,
+      outboundsTraffic: [],
+      outboundTestStates: {}, // Track testing state and results for each outbound
+      saveBtnDisable: true,
+      refreshing: false,
+      restartResult: '',
+      showAlert: false,
+      customGeoAliasLabelSuffix: '{{ i18n "pages.index.customGeoAliasLabelSuffix" }}',
+      advSettings: 'xraySetting',
+      obsSettings: '',
+      cm: null,
+      cmOptions: {
+        lineNumbers: true,
+        mode: "application/json",
+        lint: true,
+        styleActiveLine: true,
+        matchBrackets: true,
+        theme: "xq",
+        autoCloseTags: true,
+        lineWrapping: true,
+        indentUnit: 2,
+        indentWithTabs: true,
+        smartIndent: true,
+        tabSize: 2,
+        lineWiseCopyCut: false,
+        foldGutter: true,
+        gutters: [
+          "CodeMirror-lint-markers",
+          "CodeMirror-linenumbers",
+          "CodeMirror-foldgutter",
+        ],
+      },
+      ipv4Settings: {
+        tag: "IPv4",
+        protocol: "freedom",
+        settings: {
+          domainStrategy: "UseIPv4"
+        }
+      },
+      directSettings: {
+        tag: "direct",
+        protocol: "freedom"
+      },
+      routingDomainStrategies: ["AsIs", "IPIfNonMatch", "IPOnDemand"],
+      log: {
+        loglevel: ["none", "debug", "info", "warning", "error"],
+        access: ["none", "./access.log"],
+        error: ["none", "./error.log"],
+        dnsLog: false,
+        maskAddress: ["quarter", "half", "full"],
+      },
+      settingsData: {
+        protocols: {
+          bittorrent: ["bittorrent"],
+        },
+        IPsOptions: [
+          { label: 'Private IPs', value: 'geoip:private' },
+          { label: '🇮🇷 Iran', value: 'ext:geoip_IR.dat:ir' },
+          { label: '🇨🇳 China', value: 'geoip:cn' },
+          { label: '🇷🇺 Russia', value: 'ext:geoip_RU.dat:ru' },
+          { label: '🇻🇳 Vietnam', value: 'geoip:vn' },
+          { label: '🇪🇸 Spain', value: 'geoip:es' },
+          { label: '🇮🇩 Indonesia', value: 'geoip:id' },
+          { label: '🇺🇦 Ukraine', value: 'geoip:ua' },
+          { label: '🇹🇷 Türkiye', value: 'geoip:tr' },
+          { label: '🇧🇷 Brazil', value: 'geoip:br' },
+        ],
+        DomainsOptions: [
+          { label: '🇮🇷 Iran', value: 'ext:geosite_IR.dat:ir' },
+          { label: '🇮🇷 .ir', value: 'regexp:.*\\.ir$' },
+          { label: '🇮🇷 .ایران', value: 'regexp:.*\\.xn--mgba3a4f16a$' },
+          { label: '🇨🇳 China', value: 'geosite:cn' },
+          { label: '🇨🇳 .cn', value: 'regexp:.*\\.cn$' },
+          { label: '🇷🇺 Russia', value: 'ext:geosite_RU.dat:ru-available-only-inside' },
+          { label: '🇷🇺 .ru', value: 'regexp:.*\\.ru$' },
+          { label: '🇷🇺 .su', value: 'regexp:.*\\.su$' },
+          { label: '🇷🇺 .рф', value: 'regexp:.*\\.xn--p1ai$' },
+          { label: '🇻🇳 .vn', value: 'regexp:.*\\.vn$' },
+        ],
+        BlockDomainsOptions: [
+          { label: 'Ads All', value: 'geosite:category-ads-all' },
+          { label: 'Ads IR 🇮🇷', value: 'ext:geosite_IR.dat:category-ads-all' },
+          { label: 'Ads RU 🇷🇺', value: 'ext:geosite_RU.dat:category-ads-all' },
+          { label: 'Malware 🇮🇷', value: 'ext:geosite_IR.dat:malware' },
+          { label: 'Phishing 🇮🇷', value: 'ext:geosite_IR.dat:phishing' },
+          { label: 'Cryptominers 🇮🇷', value: 'ext:geosite_IR.dat:cryptominers' },
+          { label: 'Adult +18', value: 'geosite:category-porn' },
+          { label: '🇮🇷 Iran', value: 'ext:geosite_IR.dat:ir' },
+          { label: '🇮🇷 .ir', value: 'regexp:.*\\.ir$' },
+          { label: '🇮🇷 .ایران', value: 'regexp:.*\\.xn--mgba3a4f16a$' },
+          { label: '🇨🇳 China', value: 'geosite:cn' },
+          { label: '🇨🇳 .cn', value: 'regexp:.*\\.cn$' },
+          { label: '🇷🇺 Russia', value: 'ext:geosite_RU.dat:ru-available-only-inside' },
+          { label: '🇷🇺 .ru', value: 'regexp:.*\\.ru$' },
+          { label: '🇷🇺 .su', value: 'regexp:.*\\.su$' },
+          { label: '🇷🇺 .рф', value: 'regexp:.*\\.xn--p1ai$' },
+          { label: '🇻🇳 .vn', value: 'regexp:.*\\.vn$' },
+        ],
+        ServicesOptions: [
+          { label: 'Apple', value: 'geosite:apple' },
+          { label: 'Meta', value: 'geosite:meta' },
+          { label: 'Google', value: 'geosite:google' },
+          { label: 'OpenAI', value: 'geosite:openai' },
+          { label: 'Spotify', value: 'geosite:spotify' },
+          { label: 'Netflix', value: 'geosite:netflix' },
+          { label: 'Reddit', value: 'geosite:reddit' },
+          { label: 'Speedtest', value: 'geosite:speedtest' },
+        ]
+      },
+      defaultObservatory: {
+        subjectSelector: [],
+        probeURL: "https://www.google.com/generate_204",
+        probeInterval: "1m",
+        enableConcurrency: true
+      },
+      defaultBurstObservatory: {
+        subjectSelector: [],
+        pingConfig: {
+          destination: "https://www.google.com/generate_204",
+          interval: "1m",
+          connectivity: "http://connectivitycheck.platform.hicloud.com/generate_204",
+          timeout: "5s",
+          sampling: 2
+        }
+      }
+    },
+    methods: {
+      loading(spinning = true) {
+        this.loadingStates.spinning = spinning;
+      },
+      // Raw axios rather than HttpUtil: this only decides a label, so a failed
+      // fetch should leave the row reading `socks` rather than red-bar the page.
+      async loadSshOutboundTags() {
+        try {
+          const resp = await axios.post('/panel/xray/sshoutbound/list');
+          const list = resp && resp.data ? resp.data.obj : null;
+          const byTag = {};
+          (Array.isArray(list) ? list : []).forEach(t => { if (t && t.tag) byTag[t.tag] = t; });
+          // The whole tunnel and not just its tag: an SSH row in the table is a
+          // socks outbound to a loopback port, so Edit has nothing to rebuild the
+          // SSH form from except this list. Secrets are not in it; the server
+          // strips them and a blank field is what keeps the stored one.
+          this.sshOutbounds = byTag;
+          this.sshOutboundTags = Object.keys(byTag);
+        } catch (e) {
+          this.sshOutbounds = {};
+          this.sshOutboundTags = [];
+        }
+      },
+      // The client VPN tunnels, by tag. Raw axios and best effort for the same
+      // reason as the SSH tags: this decides labels and an Edit path, so a failed
+      // fetch should leave rows reading `freedom` rather than red-bar the page.
+      async loadVpnOutbounds() {
+        try {
+          const resp = await axios.post('/panel/xray/vpnoutbound/list');
+          const list = resp && resp.data ? resp.data.obj : null;
+          const byTag = {};
+          (Array.isArray(list) ? list : []).forEach(t => { if (t && t.tag) byTag[t.tag] = t; });
+          this.vpnOutbounds = byTag;
+        } catch (e) {
+          this.vpnOutbounds = {};
+        }
+      },
+      // One status probe per tunnel, in parallel. There are at most a handful of
+      // tunnels, and each one asks a different driver about a different netdev, so
+      // there is nothing to batch server-side.
+      async loadVpnOutboundStatus() {
+        const tags = Object.keys(this.vpnOutbounds);
+        if (!tags.length) return;
+        const states = {};
+        await Promise.all(tags.map(async tag => {
+          try {
+            // Plain object, never a pre-stringified body: the global request
+            // interceptor Qs.stringify's every body, and Qs.stringify of a string
+            // is the empty string, so a hand-encoded one would post nothing.
+            const resp = await axios.post('/panel/xray/vpnoutbound/status', { tag: tag });
+            const obj = resp && resp.data ? resp.data.obj : null;
+            if (obj) states[tag] = { up: !!(obj.running ?? obj.up), detail: obj.detail || obj.log || '' };
+          } catch (e) {
+            // Leave the tunnel without a state: the table then shows no dot at
+            // all, which is honest, rather than claiming it is down.
+          }
+        }));
+        this.vpnOutboundStatus = states;
+      },
+      vpnOutboundOf(outbound) {
+        return outbound && outbound.tag ? this.vpnOutbounds[outbound.tag] : undefined;
+      },
+      sshOutboundOf(outbound) {
+        return outbound && outbound.tag ? this.sshOutbounds[outbound.tag] : undefined;
+      },
+      // Which tunnel protocols this host can actually raise, and why not when it
+      // cannot. The driver registry is the only thing that knows: a kind whose
+      // client binary was never bundled for this arch is a runtime fact, not a
+      // build one. An unavailable protocol is listed and DISABLED rather than
+      // dropped, because a missing row reads as "this panel does not support it"
+      // and gives the operator nothing to act on, while a greyed one carrying its
+      // reason says what to install.
+      async loadVpnOutKinds() {
+        try {
+          const resp = await axios.post('/panel/xray/vpnoutbound/kinds');
+          const list = resp && resp.data ? resp.data.obj : null;
+          // An empty answer is treated as "unknown" rather than "none available":
+          // a picker with nothing in it is a dead form, so the local table is
+          // offered instead and an unusable kind fails loudly at save.
+          this.vpnOutKindList = Array.isArray(list) && list.length ? list : null;
+        } catch (e) {
+          this.vpnOutKindList = null;
+        }
+      },
+      // What to call an outbound in the UI. An SSH tunnel is a socks outbound in
+      // the config and must stay one, and a VPN tunnel is a freedom one, but
+      // calling them "socks" and "freedom" on screen hides what the operator
+      // actually created.
+      //
+      // The tunnels are named the way the Add Outbound picker names them (GRE,
+      // L2TP/IPsec, PPTP), NOT by their stored protocol. That value carries a
+      // "vpn:" prefix which is a discriminator in the data model and not a name:
+      // it is what isVpnProtocol tests and what decides which driver raises the
+      // tunnel, so it has to stay in the config, but on screen it only made every
+      // row read "vpn:gre" instead of "GRE".
+      //
+      // Through protocolLabel, which is what the Add Outbound picker already
+      // calls, rather than by trimming the prefix here. Two reasons: the bare kind
+      // is ambiguous for exactly one of them (Xray ships its own userspace
+      // wireguard outbound, so "wireguard" would name two different rows, which is
+      // why VPN_OUT_KINDS calls the tunnel "WireGuard (C)"), and a second lookup
+      // would be a second place to keep in step with that list.
+      outboundProtocolLabel(outbound) {
+        if (outbound && outbound.tag && this.sshOutboundTags.includes(outbound.tag)) {
+          return Protocols.SSH;
+        }
+        const vpn = this.vpnOutboundOf(outbound);
+        if (vpn) return protocolLabel(vpnProtocolFor(vpn.kind), vpn.kind);
+        return outbound ? outbound.protocol : '';
+      },
+      async getOutboundsTraffic() {
+        const msg = await HttpUtil.get("/panel/xray/getOutboundsTraffic");
+        if (msg.success) {
+          this.outboundsTraffic = msg.obj;
+        }
+      },
+      async getXraySetting() {
+        const msg = await HttpUtil.post("/panel/xray/");
+
+        if (msg.success) {
+          if (!this.loadingStates.fetched) {
+            this.loadingStates.fetched = true
+          }
+
+          result = JSON.parse(msg.obj);
+          xs = JSON.stringify(result.xraySetting, null, 2);
+          this.oldXraySetting = xs;
+          this.xraySetting = xs;
+          this.inboundTags = result.inboundTags;
+          this.outboundTestUrl = result.outboundTestUrl || 'https://www.google.com/generate_204';
+          this.oldOutboundTestUrl = this.outboundTestUrl;
+          this.saveBtnDisable = true;
+        }
+      },
+      async updateXraySetting() {
+        this.loading(true);
+        const msg = await HttpUtil.post("/panel/xray/update", {
+          xraySetting: this.xraySetting,
+          outboundTestUrl: this.outboundTestUrl || 'https://www.google.com/generate_204'
+        });
+        this.loading(false);
+        if (msg.success) {
+          await this.getXraySetting();
+        }
+      },
+      async restartXray() {
+        this.loading(true);
+        const msg = await HttpUtil.post("/panel/api/server/restartXrayService");
+        this.loading(false);
+        if (msg.success) {
+          await PromiseUtil.sleep(500);
+          await this.getXrayResult();
+        }
+        this.loading(false);
+      },
+      async getXrayResult() {
+        const msg = await HttpUtil.get("/panel/xray/getXrayResult");
+        if (msg.success) {
+          this.restartResult = msg.obj;
+          if (msg.obj.length > 1) Vue.prototype.$message.error(msg.obj);
+        }
+      },
+      async resetXrayConfigToDefault() {
+        this.loading(true);
+        const msg = await HttpUtil.get("/panel/setting/getDefaultJsonConfig");
+        this.loading(false);
+        if (msg.success) {
+          this.templateSettings = JSON.parse(JSON.stringify(msg.obj, null, 2));
+          this.saveBtnDisable = true;
+        }
+      },
+      changePage(pageKey) {
+        if (pageKey == 'tpl-advanced') this.changeCode();
+        if (pageKey == 'tpl-balancer') this.changeObsCode();
+      },
+      syncRulesWithOutbound(tag, setting) {
+        const newTemplateSettings = this.templateSettings;
+        const haveRules = newTemplateSettings.routing.rules.some((r) => r?.outboundTag === tag);
+        const outboundIndex = newTemplateSettings.outbounds.findIndex((o) => o.tag === tag);
+        if (!haveRules && outboundIndex > 0) {
+          newTemplateSettings.outbounds.splice(outboundIndex);
+        }
+        if (haveRules && outboundIndex < 0) {
+          newTemplateSettings.outbounds.push(setting);
+        }
+        this.templateSettings = newTemplateSettings;
+      },
+      templateRuleGetter(routeSettings) {
+        const { property, outboundTag } = routeSettings;
+        let result = [];
+        if (this.templateSettings != null) {
+          this.templateSettings.routing.rules.forEach(
+            (routingRule) => {
+              if (
+                routingRule.hasOwnProperty(property) &&
+                routingRule.hasOwnProperty("outboundTag") &&
+                routingRule.outboundTag === outboundTag
+              ) {
+                result.push(...routingRule[property]);
+              }
+            }
+          );
+        }
+        return result;
+      },
+      templateRuleSetter(routeSettings) {
+        const { data, property, outboundTag } = routeSettings;
+        const oldTemplateSettings = this.templateSettings;
+        const newTemplateSettings = oldTemplateSettings;
+        currentProperty = this.templateRuleGetter({ outboundTag, property })
+        if (currentProperty.length == 0) {
+          const propertyRule = {
+            type: "field",
+            outboundTag,
+            [property]: data
+          };
+          newTemplateSettings.routing.rules.push(propertyRule);
+        }
+        else {
+          const newRules = [];
+          insertedOnce = false;
+          newTemplateSettings.routing.rules.forEach(
+            (routingRule) => {
+              if (
+                routingRule.hasOwnProperty(property) &&
+                routingRule.hasOwnProperty("outboundTag") &&
+                routingRule.outboundTag === outboundTag
+              ) {
+                if (!insertedOnce && data.length > 0) {
+                  insertedOnce = true;
+                  routingRule[property] = data;
+                  newRules.push(routingRule);
+                }
+              }
+              else {
+                newRules.push(routingRule);
+              }
+            }
+          );
+          newTemplateSettings.routing.rules = newRules;
+        }
+        this.templateSettings = newTemplateSettings;
+      },
+      changeCode() {
+        if (this.cm != null) {
+          this.cm.toTextArea();
+        }
+        textAreaObj = document.getElementById('xraySetting');
+        textAreaObj.value = this[this.advSettings];
+        this.cm = CodeMirror.fromTextArea(textAreaObj, this.cmOptions);
+        this.cm.on('change', editor => {
+          value = editor.getValue();
+          if (this.isJsonString(value)) {
+            this[this.advSettings] = value;
+          }
+        });
+      },
+      changeObsCode() {
+        if (this.cm != null) {
+          this.cm.toTextArea();
+        }
+        if (this.obsSettings == '') {
+          this.cm = null;
+          return
+        }
+        textAreaObj = document.getElementById('obsSetting');
+        textAreaObj.value = this[this.obsSettings];
+        this.cm = CodeMirror.fromTextArea(textAreaObj, this.cmOptions);
+        this.cm.on('change', editor => {
+          value = editor.getValue();
+          if (this.isJsonString(value)) {
+            this[this.obsSettings] = value;
+          }
+        });
+      },
+      isJsonString(str) {
+        try {
+          JSON.parse(str);
+        } catch (e) {
+          return false;
+        }
+        return true;
+      },
+      findOutboundTraffic(o) {
+        for (const otraffic of this.outboundsTraffic) {
+          if (otraffic.tag == o.tag) {
+            return `↑ ${SizeFormatter.sizeFormat(otraffic.up)} / ${SizeFormatter.sizeFormat(otraffic.down)} ↓`
+          }
+        }
+        // No row for this tag, which is only a zero if something was counting.
+        // Both outbound stats switches ship FALSE, and with them false the core
+        // registers no outbound counter at all, so "0 B / 0 B" here would be a
+        // measurement the panel never took.
+        if (!this.outboundStatsOn()) {
+          return '{{ i18n "pages.xray.outbound.trafficUnmeasured" }}';
+        }
+        return `${SizeFormatter.sizeFormat(0)} / ${SizeFormatter.sizeFormat(0)}`
+      },
+      // Whether the core is counting outbound bytes at all right now: either the
+      // operator turned a counter on, or the panel is forcing both on because a
+      // tunnel is pinned. Not the same question as "did this outbound move any
+      // bytes", which is what a row in outboundsTraffic answers.
+      outboundStatsOn() {
+        const policy = this.templateSettings ? this.templateSettings.policy : null;
+        const sys = policy ? policy.system : null;
+        if (sys && (sys.statsOutboundUplink || sys.statsOutboundDownlink)) return true;
+        return this.vpnOutboundCountersForced;
+      },
+      // Green is for a MEASUREMENT, including a measured zero. The absence of one
+      // gets a neutral tag instead: they are different statements and the column
+      // used to make the confident one for both.
+      outboundTrafficMeasured(o) {
+        if (this.outboundsTraffic.some(t => t.tag == o.tag)) return true;
+        return this.outboundStatsOn();
+      },
+      findOutboundAddress(o) {
+        serverObj = null;
+        // A VPN tunnel's row is a freedom outbound and carries no address at all,
+        // so the peer it dials comes from the stored tunnel. Checked before the
+        // switch, which would otherwise fall through to `default` and show the
+        // column empty for every tunnel.
+        const vpn = this.vpnOutboundOf(o);
+        if (vpn) {
+          const s = vpn.settings || {};
+          // `endpoint` is what the wireguard family calls it, `server` what every
+          // other driver does.
+          const peer = s.endpoint || s.server || '';
+          return peer ? [peer] : null;
+        }
+        switch (o.protocol) {
+          case Protocols.VMess:
+            serverObj = o.settings.vnext;
+            break;
+          case Protocols.VLESS:
+            return [o.settings?.address + ':' + o.settings?.port];
+          case Protocols.HTTP:
+          case Protocols.Socks:
+          case Protocols.Shadowsocks:
+          case Protocols.Trojan:
+            serverObj = o.settings.servers;
+            break;
+          case Protocols.DNS:
+            return [o.settings?.address + ':' + o.settings?.port];
+          // Flat settings, like VLESS above and unlike the servers[] group. A
+          // missing case here is not a missing feature, it falls through to
+          // `default` and leaves the Address column empty for every row of the
+          // protocol, which reads as an outbound that has not been configured.
+          //
+          // The servers[] fallback covers a hand-written config: TUIC's upstream
+          // accepts that shape, the panel never writes it, and a row pasted into
+          // the JSON tab still has to show its address.
+          case Protocols.AnyTLS:
+          case Protocols.Tuic:
+          case Protocols.Naive:
+            if (o.settings?.address) return [o.settings.address + ':' + o.settings.port];
+            serverObj = o.settings?.servers;
+            break;
+          case Protocols.Wireguard:
+            return o.settings.peers.map(peer => peer.endpoint);
+          default:
+            return null;
+        }
+        return serverObj ? serverObj.map(obj => obj.address + ':' + obj.port) : null;
+      },
+      addOutbound() {
+        outModal.show({
+          title: '{{ i18n "pages.xray.outbound.addOutbound"}}',
+          okText: '{{ i18n "pages.xray.outbound.addOutbound" }}',
+          confirm: async (outbound) => {
+            outModal.loading();
+            // A vpn outbound is a panel-managed client tunnel, so the tunnel has
+            // to be raised before the outbound that egresses through it: the
+            // interface it lands on is decided by the driver and is not knowable
+            // until then. If it cannot be raised, nothing is added.
+            if (isVpnProtocol(outModal.outbound.protocol)) {
+              const iface = await this.saveVpnTunnel(outModal.outbound);
+              if (!iface) {
+                outModal.loading(false);
+                return;
+              }
+              // Re-serialised because the copy handed to this callback was built
+              // before the interface existed, and an outbound with no interface
+              // egresses through the host's own default route instead of the
+              // tunnel, with nothing on screen looking wrong.
+              outModal.outbound.settings.iface = iface;
+              outbound = outModal.outbound.toJson();
+              await this.loadVpnOutbounds();
+              // Not awaited: it only fills in the row's up/down tag.
+              this.loadVpnOutboundStatus();
+            }
+            // An ssh outbound is a panel-managed tunnel, so the tunnel has to
+            // exist before the outbound that points at it. If the save is
+            // refused (bad port, port already taken by another tunnel) nothing
+            // is added: an outbound aimed at a local proxy that was never bound
+            // is a dead outbound, and a confusing one, since it looks fine.
+            //
+            // outbound is already the serialised form, so the protocol reads
+            // 'socks' here; the modal's model is what still knows it is ssh.
+            if (outModal.outbound.protocol === Protocols.SSH) {
+              const port = await this.saveSshTunnel(outModal.outbound);
+              if (!port) {
+                outModal.loading(false);
+                return;
+              }
+              // The server allocated the loopback port, so the outbound has to be
+              // re-serialised: the copy handed to this callback was built before
+              // the port existed and would point at 127.0.0.1:0.
+              outModal.outbound.settings.socksPort = port;
+              outbound = outModal.outbound.toJson();
+              // So the new row reads "ssh" rather than "socks" straight away.
+              await this.loadSshOutboundTags();
+            }
+            if (outbound.tag.length > 0) {
+              this.templateSettings.outbounds.push(outbound);
+              this.outboundSettings = JSON.stringify(this.templateSettings.outbounds);
+            }
+            outModal.close();
+          },
+          isEdit: false,
+          // Tunnel tags count as taken even when no outbound carries them yet.
+          // Save() upserts by tag, so reusing one would stop the live tunnel,
+          // rebind its port, and - with the secret fields left blank, which is
+          // the normal edit flow - send the OLD server's stored password to the
+          // newly typed address.
+          tags: this.outboundAndTunnelTags()
+        });
+      },
+      // Every tag a TUNNEL holds, SSH and VPN alike. The one place that answers
+      // "is this tag a tunnel", so outboundAndTunnelTags below can decide which
+      // tags are taken. Two answers to that question would drift the first time a
+      // tunnel kind is added.
+      tunnelTags() {
+        return [...this.sshOutboundTags, ...Object.keys(this.vpnOutbounds)];
+      },
+      // Every tag an outbound may not reuse: the ones in the template plus the
+      // ones the SSH and VPN tunnels hold. `except` drops the row being edited so
+      // it does not collide with itself.
+      outboundAndTunnelTags(except) {
+        const tags = this.templateSettings.outbounds.map(obj => obj.tag);
+        this.tunnelTags().forEach(t => { if (!tags.includes(t)) tags.push(t); });
+        return except === undefined ? tags : tags.filter(t => t !== except);
+      },
+      // Creates (or replaces) the SSH tunnel behind an ssh-shaped outbound and
+      // returns the loopback SOCKS port the server bound for it, or 0 if the
+      // tunnel could not be raised. The caller needs that port to point the
+      // outbound at it, and needs the 0 to refuse adding an outbound with
+      // nothing listening behind it.
+      //
+      // The secrets travel here and only here: they are never written into the
+      // Xray config.
+      async saveSshTunnel(model) {
+        const s = model.settings;
+        const msg = await HttpUtil.post('/panel/xray/sshoutbound/save', {
+          tag: model.tag,
+          address: s.address,
+          port: s.port,
+          username: s.username,
+          authType: s.authType,
+          password: s.password,
+          privateKey: s.privateKey,
+          passphrase: s.passphrase,
+          knownHost: s.knownHost,
+          socksPort: s.socksPort,
+          // The outbound that carries this tunnel's own TCP connection to the SSH
+          // server, '' for none, and it comes from the row's own Dialer Proxy box:
+          // that is the panel's single chaining control, and on a tunnel row it
+          // means "carry this tunnel's own transport through that tag". The server
+          // turns it into routing rules and strips the key from the Xray config,
+          // where it would instead redirect the facade's CONNECT to the loopback
+          // SOCKS port and break the tunnel.
+          //
+          // Read off the model rather than the serialised row so the sockopt switch
+          // is respected: turning sockopts off drops the whole block, and a carrier
+          // the config no longer carries must not keep steering traffic.
+          //
+          // Sent on every save including the blank one: the server treats it as the
+          // whole answer, so leaving it out of a save that cleared the box would
+          // keep the old carrier and the routing rules with it.
+          via: model.stream?.sockopt?.dialerProxy || '',
+        });
+        if (!msg || !msg.success || !msg.obj) return 0;
+        return Number(msg.obj.socksPort) || 0;
+      },
+      // Raises (or replaces) the client VPN tunnel behind a vpn-shaped outbound
+      // and returns the netdev the driver landed on, or '' if it could not be
+      // raised. The caller needs the interface to pin egress to it, and needs the
+      // '' to refuse adding an outbound that would otherwise egress through the
+      // host's own default route while looking like a tunnel.
+      //
+      // The secrets travel here and only here: they are never written into the
+      // Xray config. `settings` goes as ONE form field holding JSON, because the
+      // body is form-urlencoded and the server side keeps this blob opaque
+      // (VpnOutboundConfig.Settings is a json.RawMessage each driver unmarshals
+      // for itself).
+      async saveVpnTunnel(model) {
+        const s = model.settings;
+        const msg = await HttpUtil.post('/panel/xray/vpnoutbound/save', {
+          tag: model.tag,
+          kind: s.kind,
+          remark: s.remark || '',
+          // Always enabled: see the form's comment. A stored-but-disabled tunnel
+          // has no interface, and this page has no way to show an outbound that
+          // exists but cannot carry traffic.
+          enable: true,
+          // The tunnel that carries this one's outer transport, '' for none, and it
+          // comes from the row's own Dialer Proxy box: that is the panel's single
+          // chaining control, and on a tunnel row it means "carry this tunnel's own
+          // transport through that tag". The server turns it into routing rules and
+          // strips the key from the Xray config, where it would mean the opposite
+          // and cancel the interface pin (vpnOutStreamSettings).
+          //
+          // Read off the model rather than the serialised row so the sockopt switch
+          // is respected: turning sockopts off drops the whole block, and a carrier
+          // the config no longer carries must not keep steering traffic.
+          //
+          // Sent on every save including the blank one: the server treats it as the
+          // whole answer, so leaving it out of a save that cleared the box would
+          // keep the old carrier and the routing rules with it.
+          via: model.stream?.sockopt?.dialerProxy || '',
+          settings: JSON.stringify(s.settingsPayload()),
+        });
+        if (!msg || !msg.success || !msg.obj) return '';
+        return msg.obj.iface || '';
+      },
+      editOutbound(index) {
+        const editing = app.templateSettings.outbounds[index];
+        // A VPN row is a freedom outbound in the config and an SSH row is a socks
+        // one: the endpoint, keys and credentials are not in there, so re-opening
+        // either from the row alone would show a freedom/socks form and saving it
+        // would strand the tunnel. Rebuild the tunnel form from the panel's own
+        // list instead, which is where the real settings live.
+        const vpn = this.vpnOutboundOf(editing);
+        const ssh = vpn ? undefined : this.sshOutboundOf(editing);
+        let model = editing;
+        if (vpn) model = this.vpnOutboundModel(editing, vpn);
+        else if (ssh) model = this.sshOutboundModel(editing, ssh);
+        outModal.show({
+          title: '{{ i18n "pages.xray.outbound.editOutbound"}} ' + (index + 1),
+          outbound: model,
+          confirm: async (outbound) => {
+            outModal.loading();
+            // Switching an existing row's protocol TO vpn has to raise the tunnel
+            // too, exactly as adding one does.
+            if (isVpnProtocol(outModal.outbound.protocol)) {
+              const iface = await this.saveVpnTunnel(outModal.outbound);
+              if (!iface) {
+                outModal.loading(false);
+                return;
+              }
+              outModal.outbound.settings.iface = iface;
+              outbound = outModal.outbound.toJson();
+              // A renamed tag is a NEW tunnel server-side (Save upserts by tag),
+              // so the old one would keep its netdev up with no row pointing at
+              // it and be raised again at every boot. Drop it.
+              if (vpn && vpn.tag !== outModal.outbound.tag) {
+                await HttpUtil.post('/panel/xray/vpnoutbound/delete', { tag: vpn.tag });
+              }
+              await this.loadVpnOutbounds();
+              this.loadVpnOutboundStatus();
+            }
+            // Switching an existing row's protocol TO ssh has to raise the tunnel
+            // too, exactly as adding one does. Without this the row is saved as a
+            // socks outbound aimed at 127.0.0.1:0, with nothing behind it and no
+            // error anywhere.
+            if (outModal.outbound.protocol === Protocols.SSH) {
+              const port = await this.saveSshTunnel(outModal.outbound);
+              if (!port) {
+                outModal.loading(false);
+                return;
+              }
+              outModal.outbound.settings.socksPort = port;
+              outbound = outModal.outbound.toJson();
+              // A renamed tag is a NEW tunnel server-side (Save upserts by tag),
+              // so the old one would keep its loopback port bound with no row
+              // pointing at it and be raised again at every boot. Drop it, as the
+              // vpn path above does.
+              if (ssh && ssh.tag !== outModal.outbound.tag) {
+                await HttpUtil.post('/panel/xray/sshoutbound/delete', { tag: ssh.tag });
+              }
+              await this.loadSshOutboundTags();
+            }
+            this.templateSettings.outbounds[index] = outbound;
+            this.outboundSettings = JSON.stringify(this.templateSettings.outbounds);
+            outModal.close();
+          },
+          isEdit: true,
+          tags: this.outboundAndTunnelTags(editing ? editing.tag : undefined)
+        });
+      },
+      // The Outbound the tunnel form edits, built from the stored tunnel rather
+      // than from the config row. Secrets are deliberately not carried across:
+      // the panel API does not echo them back, and a blank field is what tells
+      // the server to keep the stored one.
+      vpnOutboundModel(row, vpn) {
+        const settings = new Outbound.VpnSettings(vpn.kind, vpn.settings || {}, vpn.iface || '',
+          vpn.remark || '');
+        // The row's own stream settings come from the config and not from the
+        // tunnel list, which knows nothing about them: rebuilding from the tunnel
+        // alone would drop the operator's sockopts on the next save.
+        const stream = StreamSettings.fromJson(row.streamSettings);
+        // The carrier is written in two places at two different moments: into the
+        // tunnel (`via`) the instant the modal is confirmed, and into this row's
+        // Dialer Proxy only when the Xray page itself is saved. In between, the row
+        // is silent about a carrier the panel is already steering, and a form opened
+        // then would show none and clear it on the next save. Seeded from the tunnel
+        // for that window, and for a tunnel stored by a panel that kept the carrier
+        // in a field of its own. The row wins when it has one: that is what the
+        // operator last typed.
+        if (vpn.via && !(stream.sockopt && stream.sockopt.dialerProxy)) {
+          if (!stream.sockopt) stream.sockoptSwitch = true;
+          stream.sockopt.dialerProxy = vpn.via;
+        }
+        return new Outbound(row.tag, vpnProtocolFor(vpn.kind), settings,
+          stream, row.sendThrough);
+      },
+      // The Outbound the SSH form edits, built the same way and for the same
+      // reason: the row is a socks outbound aimed at a loopback port. Secrets are
+      // deliberately not carried across, since the panel API does not echo them
+      // back and a blank field is what tells the server to keep the stored one.
+      sshOutboundModel(row, ssh) {
+        const settings = new Outbound.SshSettings(ssh.address, ssh.port, ssh.username,
+          ssh.authType || 'password', '', '', '', ssh.knownHost || '', ssh.socksPort || 0);
+        // The row's own stream settings come from the config and not from the
+        // tunnel list, which knows nothing about them: rebuilding from the tunnel
+        // alone would drop the operator's sockopts on the next save.
+        const stream = StreamSettings.fromJson(row.streamSettings);
+        // The carrier is written in two places at two different moments: into the
+        // tunnel (`via`) the instant the modal is confirmed, and into this row's
+        // Dialer Proxy only when the Xray page itself is saved. In between, the row
+        // is silent about a carrier the panel is already steering, and a form opened
+        // then would show none and clear it on the next save. Seeded from the tunnel
+        // for that window. The row wins when it has one: that is what the operator
+        // last typed. Mirrors vpnOutboundModel above.
+        if (ssh.via && !(stream.sockopt && stream.sockopt.dialerProxy)) {
+          if (!stream.sockopt) stream.sockoptSwitch = true;
+          stream.sockopt.dialerProxy = ssh.via;
+        }
+        return new Outbound(row.tag, Protocols.SSH, settings, stream, row.sendThrough);
+      },
+      // Removing the row has to remove the tunnel behind it. Splicing alone left
+      // the tunnel in the `sshOutbounds`/`vpnOutbounds` setting still dialling
+      // (holding a loopback port, or a netdev the kernel keeps up), invisible on
+      // this page and raised again at every boot.
+      async deleteOutbound(index) {
+        const outbounds = this.templateSettings.outbounds;
+        const gone = outbounds[index];
+        outbounds.splice(index, 1);
+        this.outboundSettings = JSON.stringify(outbounds);
+        if (gone && gone.tag && this.sshOutboundTags.includes(gone.tag)) {
+          await HttpUtil.post('/panel/xray/sshoutbound/delete', { tag: gone.tag });
+          await this.loadSshOutboundTags();
+        }
+        if (gone && gone.tag && this.vpnOutbounds[gone.tag]) {
+          await HttpUtil.post('/panel/xray/vpnoutbound/delete', { tag: gone.tag });
+          await this.loadVpnOutbounds();
+        }
+      },
+      setFirstOutbound(index) {
+        outbounds = this.templateSettings.outbounds;
+        outbounds.splice(0, 0, outbounds.splice(index, 1)[0]);
+        this.outboundSettings = JSON.stringify(outbounds);
+      },
+      // The exit address a finished test observed, or null when the probe could
+      // not determine one (blocked, timed out, or an outbound that only passed
+      // the reachability check).
+      exitInfo(index) {
+        const st = this.outboundTestStates[index];
+        const exit = st && st.result && st.result.exit;
+        return exit && (exit.ipv4 || exit.ipv6) ? exit : null;
+      },
+      exitFlag(index) {
+        const exit = this.exitInfo(index);
+        return exit ? GeoUtil.flag(exit.countryCode) : '';
+      },
+      exitCountry(index) {
+        const exit = this.exitInfo(index);
+        return exit ? GeoUtil.countryName(exit.countryCode) : '';
+      },
+      async testOutbound(index) {
+        const outbound = this.templateSettings.outbounds[index];
+        if (!outbound) {
+          Vue.prototype.$message.error('{{ i18n "pages.xray.outbound.testError" }}');
+          return;
+        }
+
+        if (outbound.protocol === 'blackhole' || outbound.tag === 'blocked') {
+          Vue.prototype.$message.warning('{{ i18n "pages.xray.outbound.testError" }}: blocked/blackhole outbound');
+          return;
+        }
+
+        // Initialize test state for this outbound if not exists
+        if (!this.outboundTestStates[index]) {
+          this.$set(this.outboundTestStates, index, {
+            testing: false,
+            result: null
+          });
+        }
+
+        // Set testing state
+        this.$set(this.outboundTestStates[index], 'testing', true);
+        this.$set(this.outboundTestStates[index], 'result', null);
+
+        try {
+          const outboundJSON = JSON.stringify(outbound);
+          const allOutboundsJSON = JSON.stringify(this.templateSettings.outbounds || []);
+          
+          const msg = await HttpUtil.post("/panel/xray/testOutbound", {
+            outbound: outboundJSON,
+            allOutbounds: allOutboundsJSON
+          });
+
+          // Update test state
+          this.$set(this.outboundTestStates[index], 'testing', false);
+
+          if (msg.success && msg.obj) {
+            const result = msg.obj;
+            this.$set(this.outboundTestStates[index], 'result', result);
+            
+            if (result.success) {
+              Vue.prototype.$message.success(
+                `{{ i18n "pages.xray.outbound.testSuccess" }}: ${result.delay}ms (${result.statusCode})`
+              );
+            } else {
+              Vue.prototype.$message.error(
+                `{{ i18n "pages.xray.outbound.testFailed" }}: ${result.error || 'Unknown error'}`
+              );
+            }
+          } else {
+            this.$set(this.outboundTestStates[index], 'result', {
+              success: false,
+              error: msg.msg || '{{ i18n "pages.xray.outbound.testError" }}'
+            });
+            Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.xray.outbound.testError" }}');
+          }
+        } catch (error) {
+          this.$set(this.outboundTestStates[index], 'testing', false);
+          this.$set(this.outboundTestStates[index], 'result', {
+            success: false,
+            error: error.message || '{{ i18n "pages.xray.outbound.testError" }}'
+          });
+          Vue.prototype.$message.error('{{ i18n "pages.xray.outbound.testError" }}: ' + error.message);
+        }
+      },
+      addReverse() {
+        reverseModal.show({
+          title: '{{ i18n "pages.xray.outbound.addReverse"}}',
+          okText: '{{ i18n "pages.xray.outbound.addReverse" }}',
+          confirm: (reverse, rules) => {
+            reverseModal.loading();
+            if (reverse.tag.length > 0) {
+              newTemplateSettings = this.templateSettings;
+              if (newTemplateSettings.reverse == undefined) newTemplateSettings.reverse = {};
+              if (newTemplateSettings.reverse[reverse.type + 's'] == undefined) newTemplateSettings.reverse[reverse.type + 's'] = [];
+              newTemplateSettings.reverse[reverse.type + 's'].push({ tag: reverse.tag, domain: reverse.domain });
+              this.templateSettings = newTemplateSettings;
+
+              // Add related rules
+              this.templateSettings.routing.rules.push(...rules);
+              this.routingRuleSettings = JSON.stringify(this.templateSettings.routing.rules);
+            }
+            reverseModal.close();
+          },
+          isEdit: false
+        });
+      },
+      editReverse(index) {
+        if (this.reverseData[index].type == "bridge") {
+          oldRules = this.templateSettings.routing.rules.filter(r => r.inboundTag && r.inboundTag[0] == this.reverseData[index].tag);
+        } else {
+          oldRules = this.templateSettings.routing.rules.filter(r => r.outboundTag && r.outboundTag == this.reverseData[index].tag);
+        }
+        reverseModal.show({
+          title: '{{ i18n "pages.xray.outbound.editReverse"}} ' + (index + 1),
+          reverse: this.reverseData[index],
+          rules: oldRules,
+          confirm: (reverse, rules) => {
+            reverseModal.loading();
+            if (reverse.tag.length > 0) {
+              oldData = this.reverseData[index];
+              newTemplateSettings = this.templateSettings;
+              oldReverseIndex = newTemplateSettings.reverse[oldData.type + 's'].findIndex(rs => rs.tag == oldData.tag);
+              oldRuleIndex0 = oldRules.length > 0 ? newTemplateSettings.routing.rules.findIndex(r => JSON.stringify(r) == JSON.stringify(oldRules[0])) : -1;
+              oldRuleIndex1 = oldRules.length == 2 ? newTemplateSettings.routing.rules.findIndex(r => JSON.stringify(r) == JSON.stringify(oldRules[1])) : -1;
+              if (oldData.type == reverse.type) {
+                newTemplateSettings.reverse[oldData.type + 's'][oldReverseIndex] = { tag: reverse.tag, domain: reverse.domain };
+              } else {
+                newTemplateSettings.reverse[oldData.type + 's'].splice(oldReverseIndex, 1);
+                // delete empty object
+                if (newTemplateSettings.reverse[oldData.type + 's'].length == 0) Reflect.deleteProperty(newTemplateSettings.reverse, oldData.type + 's');
+                // add other type of reverse if it is not exist
+                if (!newTemplateSettings.reverse[reverse.type + 's']) newTemplateSettings.reverse[reverse.type + 's'] = [];
+                newTemplateSettings.reverse[reverse.type + 's'].push({ tag: reverse.tag, domain: reverse.domain });
+              }
+              this.templateSettings = newTemplateSettings;
+
+              // Adjust Rules
+              newRules = this.templateSettings.routing.rules;
+              oldRuleIndex0 != -1 ? newRules[oldRuleIndex0] = rules[0] : newRules.push(rules[0]);
+              oldRuleIndex1 != -1 ? newRules[oldRuleIndex1] = rules[1] : newRules.push(rules[1]);
+              this.routingRuleSettings = JSON.stringify(newRules);
+            }
+            reverseModal.close();
+          },
+          isEdit: true
+        });
+      },
+      deleteReverse(index) {
+        oldData = this.reverseData[index];
+        newTemplateSettings = this.templateSettings;
+        reverseTypeObj = newTemplateSettings.reverse[oldData.type + 's'];
+        realIndex = reverseTypeObj.findIndex(r => r.tag == oldData.tag && r.domain == oldData.domain);
+        newTemplateSettings.reverse[oldData.type + 's'].splice(realIndex, 1);
+
+        // delete empty objects
+        if (reverseTypeObj.length == 0) Reflect.deleteProperty(newTemplateSettings.reverse, oldData.type + 's');
+        if (Object.keys(newTemplateSettings.reverse).length === 0) Reflect.deleteProperty(newTemplateSettings, 'reverse');
+
+        // delete related routing rules
+        newRules = newTemplateSettings.routing.rules;
+        if (oldData.type == "bridge") {
+          newRules = newTemplateSettings.routing.rules.filter(r => !(r.inboundTag && r.inboundTag.length == 1 && r.inboundTag[0] == oldData.tag));
+        } else if (oldData.type == "portal") {
+          newRules = newTemplateSettings.routing.rules.filter(r => r.outboundTag != oldData.tag);
+        }
+        newTemplateSettings.routing.rules = newRules;
+
+        this.templateSettings = newTemplateSettings;
+      },
+      async refreshOutboundTraffic() {
+        if (!this.refreshing) {
+          this.refreshing = true;
+          await this.getOutboundsTraffic();
+
+          data = []
+          if (this.templateSettings != null) {
+            this.templateSettings.outbounds.forEach((o, index) => {
+              data.push({ 'key': index, ...o });
+            });
+          }
+
+          this.outboundData = data;
+          this.refreshing = false;
+        }
+      },
+      async resetOutboundTraffic(index) {
+        let tag = "-alltags-";
+        if (index >= 0) {
+          tag = this.outboundData[index].tag ? this.outboundData[index].tag : ""
+        }
+        const msg = await HttpUtil.post("/panel/xray/resetOutboundsTraffic", { tag: tag });
+        if (msg.success) {
+          await this.refreshOutboundTraffic();
+        }
+      },
+      addBalancer() {
+        balancerModal.show({
+          title: '{{ i18n "pages.xray.balancer.addBalancer"}}',
+          okText: '{{ i18n "pages.xray.balancer.addBalancer"}}',
+          balancerTags: this.balancersData.filter((o) => !ObjectUtil.isEmpty(o.tag)).map(obj => obj.tag),
+          balancer: {
+            tag: '',
+            strategy: 'random',
+            selector: [],
+            fallbackTag: ''
+          },
+          confirm: (balancer) => {
+            balancerModal.loading();
+            newTemplateSettings = this.templateSettings;
+            if (newTemplateSettings.routing.balancers == undefined) {
+              newTemplateSettings.routing.balancers = [];
+            }
+            let tmpBalancer = {
+              'tag': balancer.tag,
+              'selector': balancer.selector,
+              'fallbackTag': balancer.fallbackTag
+            };
+            if (balancer.strategy && balancer.strategy != 'random') {
+              tmpBalancer.strategy = {
+                'type': balancer.strategy
+              };
+            }
+            newTemplateSettings.routing.balancers.push(tmpBalancer);
+            this.templateSettings = newTemplateSettings;
+            this.updateObservatorySelectors();
+            balancerModal.close();
+            this.changeObsCode();
+          },
+          isEdit: false
+        });
+      },
+      editBalancer(index) {
+        const oldTag = this.balancersData[index].tag;
+        balancerModal.show({
+          title: '{{ i18n "pages.xray.balancer.editBalancer"}}',
+          okText: '{{ i18n "sure" }}',
+          balancerTags: this.balancersData.filter((o) => !ObjectUtil.isEmpty(o.tag)).map(obj => obj.tag),
+          balancer: this.balancersData[index],
+          confirm: (balancer) => {
+            balancerModal.loading();
+            newTemplateSettings = this.templateSettings;
+
+            let tmpBalancer = {
+              'tag': balancer.tag,
+              'selector': balancer.selector,
+              'fallbackTag': balancer.fallbackTag
+            };
+
+            // Remove old tag
+            if (newTemplateSettings.observatory) {
+              newTemplateSettings.observatory.subjectSelector = newTemplateSettings.observatory.subjectSelector.filter(s => s != oldTag);
+            }
+            if (newTemplateSettings.burstObservatory) {
+              newTemplateSettings.burstObservatory.subjectSelector = newTemplateSettings.burstObservatory.subjectSelector.filter(s => s != oldTag);
+            }
+
+            if (balancer.strategy && balancer.strategy != 'random') {
+              tmpBalancer.strategy = {
+                'type': balancer.strategy
+              };
+            }
+
+            newTemplateSettings.routing.balancers[index] = tmpBalancer;
+            // change edited tag if used in rule section
+            if (oldTag != balancer.tag) {
+              newTemplateSettings.routing.rules.forEach((rule) => {
+                if (rule.balancerTag && rule.balancerTag == oldTag) {
+                  rule.balancerTag = balancer.tag;
+                }
+              });
+            }
+            this.templateSettings = newTemplateSettings;
+            this.updateObservatorySelectors();
+            balancerModal.close();
+            this.changeObsCode();
+          },
+          isEdit: true
+        });
+      },
+      updateObservatorySelectors() {
+        newTemplateSettings = this.templateSettings;
+        const leastPings = this.balancersData.filter((b) => b.strategy == 'leastPing');
+        const leastLoads = this.balancersData.filter((b) =>
+          b.strategy === 'leastLoad' ||
+          b.strategy === 'roundRobin' ||
+          b.strategy === 'random'
+        );
+        if (leastPings.length > 0) {
+          if (!newTemplateSettings.observatory)
+            newTemplateSettings.observatory = this.defaultObservatory;
+          newTemplateSettings.observatory.subjectSelector = [];
+          leastPings.forEach((b) => {
+            b.selector.forEach((s) => {
+              if (!newTemplateSettings.observatory.subjectSelector.includes(s))
+                newTemplateSettings.observatory.subjectSelector.push(s);
+            });
+          });
+        } else {
+          delete newTemplateSettings.observatory
+        }
+        if (leastLoads.length > 0) {
+          if (!newTemplateSettings.burstObservatory)
+            newTemplateSettings.burstObservatory = this.defaultBurstObservatory;
+          newTemplateSettings.burstObservatory.subjectSelector = [];
+          leastLoads.forEach((b) => {
+            b.selector.forEach((s) => {
+              if (!newTemplateSettings.burstObservatory.subjectSelector.includes(s))
+                newTemplateSettings.burstObservatory.subjectSelector.push(s);
+            });
+          });
+        } else {
+          delete newTemplateSettings.burstObservatory
+        }
+        this.templateSettings = newTemplateSettings;
+        this.changeObsCode();
+      },
+      deleteBalancer(index) {
+        newTemplateSettings = this.templateSettings;
+
+        // Remove from balancers
+        const removedBalancer = this.balancersData.splice(index, 1)[0];
+
+        // Remove from settings
+        let realIndex = newTemplateSettings.routing.balancers.findIndex((b) => b.tag === removedBalancer.tag);
+        newTemplateSettings.routing.balancers.splice(realIndex, 1);
+
+        // Update balancers property to an empty array if there are no more balancers
+        if (newTemplateSettings.routing.balancers.length === 0) {
+          delete newTemplateSettings.routing.balancers;
+        }
+
+        // Remove orphaned balancer references from routing rules
+        if (newTemplateSettings.routing.rules) {
+          newTemplateSettings.routing.rules.forEach((rule) => {
+            if (rule.balancerTag && rule.balancerTag === removedBalancer.tag) {
+              delete rule.balancerTag;
+            }
+          });
+        }
+        this.templateSettings = newTemplateSettings;
+        this.updateObservatorySelectors();
+        this.obsSettings = '';
+        this.changeObsCode()
+      },
+      openDNSPresets() {
+        dnsPresetsModal.show({
+          title: '{{ i18n "pages.xray.dns.dnsPresetTitle" }}',
+          selected: (selectedPreset) => {
+            this.dnsServers = selectedPreset;
+
+            dnsPresetsModal.close();
+          }
+        });
+      },
+      addDNSServer() {
+        dnsModal.show({
+          title: '{{ i18n "pages.xray.dns.add" }}',
+          confirm: (dnsServer) => {
+            dnsServers = this.dnsServers;
+            dnsServers.push(dnsServer);
+            this.dnsServers = dnsServers;
+            dnsModal.close();
+          },
+          isEdit: false
+        });
+      },
+      editDNSServer(index) {
+        dnsModal.show({
+          title: '{{ i18n "pages.xray.dns.edit" }} #' + (index + 1),
+          dnsServer: this.dnsServers[index],
+          confirm: (dnsServer) => {
+            dnsServers = this.dnsServers;
+            dnsServers[index] = dnsServer;
+            this.dnsServers = dnsServers;
+            dnsModal.close();
+          },
+          isEdit: true
+        });
+      },
+      deleteDNSServer(index) {
+        newDnsServers = this.dnsServers;
+        newDnsServers.splice(index, 1);
+        this.dnsServers = newDnsServers;
+      },
+      addFakedns() {
+        fakednsModal.show({
+          title: '{{ i18n "pages.xray.fakedns.add" }}',
+          confirm: (item) => {
+            fakeDns = this.fakeDns ?? [];
+            fakeDns.push(item);
+            this.fakeDns = fakeDns;
+            fakednsModal.close();
+          },
+          isEdit: false
+        });
+      },
+      editFakedns(index) {
+        fakednsModal.show({
+          title: '{{ i18n "pages.xray.fakedns.edit" }} #' + (index + 1),
+          fakeDns: this.fakeDns[index],
+          confirm: (item) => {
+            fakeDns = this.fakeDns;
+            fakeDns[index] = item;
+            this.fakeDns = fakeDns;
+            fakednsModal.close();
+          },
+          isEdit: true
+        });
+      },
+      deleteFakedns(index) {
+        fakeDns = this.fakeDns;
+        fakeDns.splice(index, 1);
+        this.fakeDns = fakeDns;
+      },
+      addRule() {
+        ruleModal.show({
+          title: '{{ i18n "pages.xray.rules.add"}}',
+          okText: '{{ i18n "pages.xray.rules.add" }}',
+          confirm: (rule) => {
+            ruleModal.loading();
+            if (JSON.stringify(rule).length > 3) {
+              this.templateSettings.routing.rules.push(rule);
+              this.routingRuleSettings = JSON.stringify(this.templateSettings.routing.rules);
+            }
+            ruleModal.close();
+          },
+          isEdit: false
+        });
+      },
+      editRule(index) {
+        ruleModal.show({
+          title: '{{ i18n "pages.xray.rules.edit"}} ' + (index + 1),
+          rule: app.templateSettings.routing.rules[index],
+          confirm: (rule) => {
+            ruleModal.loading();
+            if (JSON.stringify(rule).length > 3) {
+              this.templateSettings.routing.rules[index] = rule;
+              this.routingRuleSettings = JSON.stringify(this.templateSettings.routing.rules);
+            }
+            ruleModal.close();
+          },
+          isEdit: true
+        });
+      },
+      replaceRule(old_index, new_index) {
+        rules = this.templateSettings.routing.rules;
+        if (new_index >= rules.length) rules.push(undefined);
+        rules.splice(new_index, 0, rules.splice(old_index, 1)[0]);
+        this.routingRuleSettings = JSON.stringify(rules);
+      },
+      deleteRule(index) {
+        rules = this.templateSettings.routing.rules;
+        rules.splice(index, 1);
+        this.routingRuleSettings = JSON.stringify(rules);
+      },
+      showWarp() {
+        // Present the two WARP methods (WireGuard vs official warp-cli SOCKS5). Where
+        // warp-cli cannot be installed (no apt/dnf) there is no choice to make, so the
+        // WireGuard method opens directly.
+        if (!PanelPlatform.warpCli) {
+          warpModal.show();
+          return;
+        }
+        warpSocksModal.show();
+      },
+      showNord() {
+        nordModal.show();
+      },
+      async loadCustomGeoAliases() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/custom-geo/aliases');
+          if (!msg.success) {
+            console.warn('Failed to load custom geo aliases:', msg.msg || 'request failed');
+            return;
+          }
+          if (!msg.obj) return;
+          const geoip = msg.obj.geoip ?? [];
+          const geosite = msg.obj.geosite ?? [];
+          const geoSuffix = this.customGeoAliasLabelSuffix || '';
+          geoip.forEach((x) => {
+            this.settingsData.IPsOptions.push({
+              label: x.alias + geoSuffix,
+              value: x.extExample,
+            });
+          });
+          geosite.forEach((x) => {
+            const opt = { label: x.alias + geoSuffix, value: x.extExample };
+            this.settingsData.DomainsOptions.push(opt);
+            this.settingsData.BlockDomainsOptions.push(opt);
+          });
+        } catch (e) {
+          console.error('Failed to load custom geo aliases:', e);
+        }
+      },
+      // The banner's own X is a session dismiss and needs no handler; this is
+      // the permanent one, and it silences the banner on every page.
+      dismissSecAlert() {
+        SecAlertDismissal.dismiss();
+        this.showAlert = false;
+      }
+    },
+    async mounted() {
+      // 'tpl-basic' was the strip's default-active-key. The five keys after it
+      // are the panes that carried force-render="true" and must exist from the
+      // start; changeCode and changeObsCode reach into two of them by id.
+      this.initSections('tpl-basic', ['tpl-outbound', 'tpl-reverse', 'tpl-balancer', 'tpl-dns', 'tpl-advanced']);
+      if (window.location.protocol !== "https:" && !SecAlertDismissal.isDismissed()) {
+        this.showAlert = true;
+      }
+      // In parallel: awaiting the tags AFTER the settings let the table paint once
+      // with an empty tag list, so every ssh row flashed "socks" before correcting.
+      await Promise.all([this.getXraySetting(), this.loadSshOutboundTags(), this.loadVpnOutbounds(), this.loadVpnOutKinds()]);
+      // Not awaited with the rest: this is one request per tunnel and only decides
+      // a status dot, so the table should not wait on a driver that is slow to
+      // answer (a dialling client, an unreachable peer).
+      this.loadVpnOutboundStatus();
+      await this.loadCustomGeoAliases();
+      await this.getXrayResult();
+      await this.getOutboundsTraffic();
+
+      if (window.wsClient) {
+          window.wsClient.connect();
+          window.wsClient.on('outbounds', (payload) => {
+            if (payload) {
+              this.outboundsTraffic = payload;
+              this.$forceUpdate();
+            }
+          });
+
+          // Handle invalidate signals (sent when payload is too large for WebSocket,
+          // or when traffic job notifies about data changes)
+          window.wsClient.on('invalidate', (payload) => {
+            if (payload && payload.type === 'outbounds') {
+              this.refreshOutboundTraffic();
+            }
+          });
+      }
+
+      while (true) {
+        await PromiseUtil.sleep(800);
+        this.saveBtnDisable = this.oldXraySetting === this.xraySetting && this.oldOutboundTestUrl === this.outboundTestUrl;
+      }
+    },
+    computed: {
+      templateSettings: {
+        get: function () {
+          const parsedSettings = this.xraySetting ? JSON.parse(this.xraySetting) : null;
+          return parsedSettings;
+        },
+        set: function (newValue) {
+          if (newValue) {
+            this.xraySetting = JSON.stringify(newValue, null, 2);
+          }
+        },
+      },
+      inboundSettings: {
+        get: function () { return this.templateSettings ? JSON.stringify(this.templateSettings.inbounds, null, 2) : null; },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.inbounds = JSON.parse(newValue);
+          this.templateSettings = newTemplateSettings;
+        },
+      },
+      outboundSettings: {
+        get: function () { return this.templateSettings ? JSON.stringify(this.templateSettings.outbounds, null, 2) : null; },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.outbounds = JSON.parse(newValue);
+          this.templateSettings = newTemplateSettings;
+        },
+      },
+      outboundData: {
+        get: function () {
+          data = []
+          if (this.templateSettings != null) {
+            this.templateSettings.outbounds.forEach((o, index) => {
+              data.push({ 'key': index, ...o });
+            });
+          }
+          return data;
+        },
+      },
+      reverseData: {
+        get: function () {
+          data = []
+          if (this.templateSettings != null && this.templateSettings.reverse != null) {
+            if (this.templateSettings.reverse.bridges) {
+              this.templateSettings.reverse.bridges.forEach((o, index) => {
+                data.push({ 'key': index, 'type': 'bridge', ...o });
+              });
+            }
+            if (this.templateSettings.reverse.portals) {
+              this.templateSettings.reverse.portals.forEach((o, index) => {
+                data.push({ 'key': index, 'type': 'portal', ...o });
+              });
+            }
+          }
+          return data;
+        },
+      },
+      routingRuleSettings: {
+        get: function () { return this.templateSettings ? JSON.stringify(this.templateSettings.routing.rules, null, 2) : null; },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.routing.rules = JSON.parse(newValue);
+          this.templateSettings = newTemplateSettings;
+        },
+      },
+      routingRuleData: {
+        get: function () {
+          data = [];
+          if (this.templateSettings != null) {
+            this.templateSettings.routing.rules.forEach((r, index) => {
+              data.push({ 'key': index, ...r });
+            });
+            // Make rules readable
+            data.forEach(r => {
+              if (r.domain) r.domain = r.domain.join(',')
+              if (r.ip) r.ip = r.ip.join(',')
+              if (r.source) r.source = r.source.join(',');
+              if (r.user) r.user = r.user.join(',')
+              if (r.inboundTag) r.inboundTag = r.inboundTag.join(',')
+              if (r.protocol) r.protocol = r.protocol.join(',')
+              if (r.attrs) r.attrs = JSON.stringify(r.attrs, null, 2)
+            });
+          }
+          return data;
+        }
+      },
+      balancersData: {
+        get: function () {
+          data = []
+          if (this.templateSettings != null && this.templateSettings.routing != null && this.templateSettings.routing.balancers != null) {
+            this.templateSettings.routing.balancers.forEach((o, index) => {
+              data.push({
+                'key': index,
+                'tag': o.tag ? o.tag : "",
+                'strategy': o.strategy?.type ?? "random",
+                'selector': o.selector ? o.selector : [],
+                'fallbackTag': o.fallbackTag ?? '',
+              });
+            });
+          }
+          return data;
+        }
+      },
+      observatory: {
+        get: function () {
+          return this.templateSettings?.observatory ? JSON.stringify(this.templateSettings.observatory, null, 2) : null;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.observatory = JSON.parse(newValue);
+          this.templateSettings = newTemplateSettings;
+        },
+      },
+      burstObservatory: {
+        get: function () {
+          return this.templateSettings?.burstObservatory ? JSON.stringify(this.templateSettings.burstObservatory, null, 2) : null;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.burstObservatory = JSON.parse(newValue);
+          this.templateSettings = newTemplateSettings;
+        },
+      },
+      observatoryEnable: function () { return this.templateSettings != null && this.templateSettings.observatory != undefined },
+      burstObservatoryEnable: function () { return this.templateSettings != null && this.templateSettings.burstObservatory != undefined },
+      freedomStrategy: {
+        get: function () {
+          if (!this.templateSettings) return "AsIs";
+          freedomOutbound = this.templateSettings.outbounds.find((o) => o.protocol === "freedom" && o.tag == "direct");
+          if (!freedomOutbound) return "AsIs";
+          if (!freedomOutbound.settings || !freedomOutbound.settings.domainStrategy) return "AsIs";
+          return freedomOutbound.settings.domainStrategy;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          freedomOutboundIndex = newTemplateSettings.outbounds.findIndex((o) => o.protocol === "freedom" && o.tag == "direct");
+          if (freedomOutboundIndex == -1) {
+            newTemplateSettings.outbounds.push({ protocol: "freedom", tag: "direct", settings: { "domainStrategy": newValue } });
+          } else if (!newTemplateSettings.outbounds[freedomOutboundIndex].settings) {
+            newTemplateSettings.outbounds[freedomOutboundIndex].settings = { "domainStrategy": newValue };
+          } else {
+            newTemplateSettings.outbounds[freedomOutboundIndex].settings.domainStrategy = newValue;
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      routingStrategy: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.routing || !this.templateSettings.routing.domainStrategy) return "AsIs";
+          return this.templateSettings.routing.domainStrategy;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.routing.domainStrategy = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      logLevel: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.log || !this.templateSettings.log.loglevel) return "warning";
+          return this.templateSettings.log.loglevel;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.log.loglevel = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      accessLog: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.log || !this.templateSettings.log.access) return "";
+          return this.templateSettings.log.access;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.log.access = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      errorLog: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.log || !this.templateSettings.log.error) return "";
+          return this.templateSettings.log.error;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.log.error = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnslog: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.log || !this.templateSettings.log.dnsLog) return false;
+          return this.templateSettings.log.dnsLog;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.log.dnsLog = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      statsInboundUplink: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.policy.system || !this.templateSettings.policy.system.statsInboundUplink) return false;
+          return this.templateSettings.policy.system.statsInboundUplink;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.policy.system.statsInboundUplink = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      statsInboundDownlink: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.policy.system || !this.templateSettings.policy.system.statsInboundDownlink) return false;
+          return this.templateSettings.policy.system.statsInboundDownlink;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.policy.system.statsInboundDownlink = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      // True when the panel is force-enabling the two outbound stats counters in
+      // the config it BUILDS, which it does as soon as one client tunnel is
+      // actually pinned to a netdev: a tunnel's bytes are invisible to the core
+      // without those counters, and both ship false. Mirrors the condition the
+      // Go side uses (enabled, tagged, and holding an interface), so the switches
+      // below and the traffic column describe the running config rather than the
+      // stored template.
+      vpnOutboundCountersForced: function () {
+        return Object.values(this.vpnOutbounds || {})
+          .some(t => t && t.enable !== false && t.tag && t.iface);
+      },
+      statsOutboundUplink: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.policy.system || !this.templateSettings.policy.system.statsOutboundUplink) return false;
+          return this.templateSettings.policy.system.statsOutboundUplink;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.policy.system.statsOutboundUplink = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      statsOutboundDownlink: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.policy.system || !this.templateSettings.policy.system.statsOutboundDownlink) return false;
+          return this.templateSettings.policy.system.statsOutboundDownlink;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.policy.system.statsOutboundDownlink = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      maskAddressLog: {
+        get: function () {
+          if (!this.templateSettings || !this.templateSettings.log || !this.templateSettings.log.maskAddress) return "";
+          return this.templateSettings.log.maskAddress;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.log.maskAddress = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      blockedIPs: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "blocked", property: "ip" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "blocked", property: "ip", data: newValue });
+        }
+      },
+      blockedDomains: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "blocked", property: "domain" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "blocked", property: "domain", data: newValue });
+        }
+      },
+      blockedProtocols: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "blocked", property: "protocol" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "blocked", property: "protocol", data: newValue });
+        }
+      },
+      directIPs: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "direct", property: "ip" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "direct", property: "ip", data: newValue });
+          this.syncRulesWithOutbound("direct", this.directSettings);
+        }
+      },
+      directDomains: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "direct", property: "domain" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "direct", property: "domain", data: newValue });
+          this.syncRulesWithOutbound("direct", this.directSettings);
+        }
+      },
+      ipv4Domains: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "IPv4", property: "domain" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "IPv4", property: "domain", data: newValue });
+          this.syncRulesWithOutbound("IPv4", this.ipv4Settings);
+        }
+      },
+      warpDomains: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: "warp", property: "domain" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: "warp", property: "domain", data: newValue });
+        }
+      },
+      nordTag: {
+        get: function () {
+          return this.templateSettings ? (this.templateSettings.outbounds.find((o) => o.tag.startsWith("nord-")) || { tag: "nord" }).tag : "nord";
+        }
+      },
+      nordDomains: {
+        get: function () {
+          return this.templateRuleGetter({ outboundTag: this.nordTag, property: "domain" });
+        },
+        set: function (newValue) {
+          this.templateRuleSetter({ outboundTag: this.nordTag, property: "domain", data: newValue });
+        }
+      },
+      torrentSettings: {
+        get: function () {
+          return ArrayUtils.doAllItemsExist(this.settingsData.protocols.bittorrent, this.blockedProtocols);
+        },
+        set: function (newValue) {
+          if (newValue) {
+            this.blockedProtocols = [...this.blockedProtocols, ...this.settingsData.protocols.bittorrent];
+          } else {
+            this.blockedProtocols = this.blockedProtocols.filter(data => !this.settingsData.protocols.bittorrent.includes(data));
+          }
+        },
+      },
+      WarpExist: {
+        get: function () {
+          return this.templateSettings ? this.templateSettings.outbounds.findIndex((o) => o.tag == "warp") >= 0 : false;
+        },
+      },
+      NordExist: {
+        get: function () {
+          return this.templateSettings ? this.templateSettings.outbounds.findIndex((o) => o.tag.startsWith("nord-")) >= 0 : false;
+        },
+      },
+      enableDNS: {
+        get: function () {
+          return this.templateSettings ? this.templateSettings.dns != null : false;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns = {
+              servers: [],
+              queryStrategy: "UseIP",
+              tag: "dns_inbound",
+              enableParallelQuery: false
+            };
+            newTemplateSettings.fakedns = null;
+          } else {
+            delete newTemplateSettings.dns;
+            delete newTemplateSettings.fakedns;
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsTag: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.tag : "";
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.dns.tag = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsClientIp: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.clientIp : null;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns.clientIp = newValue;
+          } else {
+            delete newTemplateSettings.dns.clientIp;
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsDisableCache: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.disableCache : false;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns.disableCache = newValue;
+          } else {
+            delete newTemplateSettings.dns.disableCache
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsDisableFallback: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.disableFallback : false;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns.disableFallback = newValue;
+          } else {
+            delete newTemplateSettings.dns.disableFallback
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsDisableFallbackIfMatch: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.disableFallbackIfMatch : false;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns.disableFallbackIfMatch = newValue;
+          } else {
+            delete newTemplateSettings.dns.disableFallbackIfMatch
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsEnableParallelQuery: {
+        get: function () {
+          return this.enableDNS ? (this.templateSettings.dns.enableParallelQuery || false) : false;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns.enableParallelQuery = newValue;
+          } else {
+            delete newTemplateSettings.dns.enableParallelQuery
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsUseSystemHosts: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.useSystemHosts : false;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (newValue) {
+            newTemplateSettings.dns.useSystemHosts = newValue;
+          } else {
+            delete newTemplateSettings.dns.useSystemHosts
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsStrategy: {
+        get: function () {
+          return this.enableDNS ? this.templateSettings.dns.queryStrategy : null;
+        },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.dns.queryStrategy = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      dnsServers: {
+        get: function () { return this.enableDNS ? this.templateSettings.dns.servers : []; },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          newTemplateSettings.dns.servers = newValue;
+          this.templateSettings = newTemplateSettings;
+        }
+      },
+      fakeDns: {
+        get: function () { return this.templateSettings && this.templateSettings.fakedns ? this.templateSettings.fakedns : []; },
+        set: function (newValue) {
+          newTemplateSettings = this.templateSettings;
+          if (this.enableDNS) {
+            newTemplateSettings.fakedns = newValue.length > 0 ? newValue : null;
+          } else {
+            delete newTemplateSettings.fakedns;
+          }
+          this.templateSettings = newTemplateSettings;
+        }
+      }
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

@@ -1,0 +1,477 @@
+{{define "form/client"}}
+<a-form
+    layout="horizontal"
+    v-if="client"
+    :colon="false"
+    :label-col="{ md: {span:8} }"
+    :wrapper-col="{ md: {span:14} }"
+>
+    <a-form-item label='{{ i18n "pages.inbounds.enable" }}'>
+        <a-switch v-model="client.enable"></a-switch>
+    </a-form-item>
+    <a-form-item>
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "pages.inbounds.emailDesc" }}</span>
+                </template>
+                {{ i18n "pages.inbounds.email" }}
+                <a-icon
+                    type="sync"
+                    @click="client.email = RandomUtil.randomLowerAndNum(9)"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.email"></a-input>
+    </a-form-item>
+    <a-form-item
+        v-if="inbound.protocol === Protocols.L2TP || inbound.protocol === Protocols.PPTP || inbound.protocol === Protocols.OPENVPN || inbound.protocol === Protocols.OPENCONNECT || inbound.protocol === Protocols.SSTP || inbound.protocol === Protocols.SSH || (inbound.protocol === Protocols.IKEV2 && inbound.settings.authMode !== 'eap-tls' && inbound.settings.authMode !== 'psk')"
+    >
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "reset" }}</span>
+                </template>
+                Username
+                <a-icon
+                    @click="client.id = RandomUtil.randomLowerAndNum(8)"
+                    type="sync"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.id"></a-input>
+    </a-form-item>
+    <!-- naive's own username, deliberately NOT the client.id the block above binds:
+         naive has no id field, and this one may be left blank, in which case the
+         account authenticates with its email exactly as it did before the field
+         existed. The email stays the accounting identity either way.
+
+         The revocation warning in the tooltip is the important half. An account has
+         exactly ONE valid Basic username, so filling this in does not add a second way
+         to log in, it REPLACES the email as the credential, and every device already
+         configured with that account starts getting 407 with nothing to explain it.
+         It goes in the tooltip rather than an alert banner on purpose. -->
+    <a-form-item v-if="inbound.protocol === Protocols.NAIVE">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>The username half of naive's Basic credential. Leave it empty
+                        to keep using the email, which is what accounts created before
+                        this field do. It must be unique within this inbound and cannot
+                        contain a colon.
+                        <b>Setting one on an existing account revokes its email:</b> the
+                        account then logs in only under this username, so every device
+                        already using it gets 407 until you hand out the new link.</span>
+                </template>
+                Username
+                <a-icon
+                    @click="client.username = RandomUtil.randomLowerAndNum(8)"
+                    type="sync"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input
+            v-model.trim="client.username"
+            :placeholder="client.email"
+        ></a-input>
+    </a-form-item>
+    <!-- MTProto authenticates on a 32-hex secret, not a password: it is the whole
+         credential and it is what the tg:// link carries. -->
+    <a-form-item v-if="inbound.protocol === Protocols.MTPROTO">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "reset" }}</span>
+                </template>
+                Secret
+                <a-icon
+                    @click="client.secret = RandomUtil.randomSeq(32, { type: 'hex' })"
+                    type="sync"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.secret"></a-input>
+    </a-form-item>
+    <a-form-item
+        v-if="inbound.protocol === Protocols.TROJAN || inbound.protocol === Protocols.SHADOWSOCKS || inbound.protocol === Protocols.ANYTLS || inbound.protocol === Protocols.TUIC || inbound.protocol === Protocols.NAIVE || inbound.protocol === Protocols.L2TP || inbound.protocol === Protocols.PPTP || inbound.protocol === Protocols.OPENVPN || inbound.protocol === Protocols.OPENCONNECT || inbound.protocol === Protocols.SSTP || inbound.protocol === Protocols.SSH || (inbound.protocol === Protocols.IKEV2 && inbound.settings.authMode !== 'eap-tls' && inbound.settings.authMode !== 'psk')"
+    >
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "reset" }}</span>
+                </template>
+                {{ i18n "password" }}
+                <a-icon
+                    v-if="inbound.protocol === Protocols.SHADOWSOCKS"
+                    @click="client.password = RandomUtil.randomShadowsocksPassword(inbound.settings.method)"
+                    type="sync"
+                ></a-icon>
+                <a-icon
+                    v-if="inbound.protocol === Protocols.TROJAN || inbound.protocol === Protocols.ANYTLS || inbound.protocol === Protocols.TUIC || inbound.protocol === Protocols.NAIVE || inbound.protocol === Protocols.L2TP || inbound.protocol === Protocols.PPTP || inbound.protocol === Protocols.OPENVPN || inbound.protocol === Protocols.OPENCONNECT || inbound.protocol === Protocols.SSTP || inbound.protocol === Protocols.IKEV2 || inbound.protocol === Protocols.SSH"
+                    @click="client.password = RandomUtil.randomSeq(10)"
+                    type="sync"
+                >
+                </a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.password"></a-input>
+    </a-form-item>
+    <a-form-item v-if="inbound.protocol === Protocols.HYSTERIA">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "reset" }}</span>
+                </template>
+                Auth Password
+                <a-icon
+                    @click="client.auth = RandomUtil.randomSeq(10)"
+                    type="sync"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.auth"></a-input>
+    </a-form-item>
+    <!-- TUIC authenticates on a UUID AND a password, not on one or the other: the
+         UUID names the account inside the QUIC session and the password proves it. -->
+    <a-form-item
+        v-if="inbound.protocol === Protocols.VMESS || inbound.protocol === Protocols.VLESS || inbound.protocol === Protocols.TUIC"
+    >
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "reset" }}</span>
+                </template>
+                ID
+                <a-icon
+                    @click="client.id = RandomUtil.randomUUID()"
+                    type="sync"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.id"></a-input>
+    </a-form-item>
+    <a-form-item
+        v-if="inbound.protocol === Protocols.VMESS"
+        label='{{ i18n "security" }}'
+    >
+        <a-select
+            v-model="client.security"
+            :dropdown-class-name="themeSwitcher.currentTheme"
+        >
+            <a-select-option v-for="key in USERS_SECURITY" :value="key"
+                >[[ key ]]</a-select-option
+            >
+        </a-select>
+    </a-form-item>
+    <a-form-item v-if="client.email && app.subSettings?.enable">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "pages.inbounds.subscriptionDesc" }}</span>
+                </template>
+                Subscription
+                <a-icon
+                    @click="client.subId = RandomUtil.randomLowerAndNum(16)"
+                    type="sync"
+                ></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input v-model.trim="client.subId"></a-input>
+    </a-form-item>
+    <a-form-item v-if="client.email && app.tgBotEnable">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "pages.inbounds.telegramDesc" }}</span>
+                </template>
+                Telegram ChatID
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input-number
+            :style="{ width: '50%' }"
+            v-model.number="client.tgId"
+            min="0"
+        ></a-input-number>
+    </a-form-item>
+    <a-form-item v-if="client.email" label='{{ i18n "comment" }}'>
+        <a-input v-model.trim="client.comment"></a-input>
+    </a-form-item>
+    <a-form-item v-if="app.ipLimitEnable">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "pages.inbounds.IPLimitDesc"}}</span>
+                </template>
+                <span>{{ i18n "pages.inbounds.IPLimit"}} </span>
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input-number
+            v-model.number="client.limitIp"
+            min="0"
+        ></a-input-number>
+    </a-form-item>
+    <a-form-item
+        v-if="app.ipLimitEnable && client.limitIp > 0 && client.email && isEdit"
+    >
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span>{{ i18n "pages.inbounds.IPLimitlogDesc" }}</span>
+                </template>
+                <span>{{ i18n "pages.inbounds.IPLimitlog" }} </span>
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
+        </template>
+        <a-tooltip>
+            <template slot="title">
+                <span>{{ i18n "pages.inbounds.IPLimitlogclear" }}</span>
+            </template>
+            <span :style="{ color: 'var(--error)' }">
+                <a-icon
+                    type="delete"
+                    @click="clearDBClientIps(client.email)"
+                ></a-icon>
+            </span>
+        </a-tooltip>
+        <a-form layout="block">
+            <a-textarea
+                id="clientIPs"
+                readonly
+                @click="getDBClientIps(client.email)"
+                placeholder="Click To Get IPs"
+                :auto-size="{ minRows: 5, maxRows: 10 }"
+            >
+            </a-textarea>
+        </a-form>
+    </a-form-item>
+    <!-- The per-client Flow picker used to sit here. It is gone rather than merely
+         hidden: flow now belongs to the inbound (form/protocol/vless.html) and every
+         client entry is a mirror of that one value, so a picker here would let an
+         operator choose something the next save silently overwrites. It was only
+         ever reachable for the seed client of a NEW vless inbound anyway, since the
+         clients moved to their own page and vless.html lists them read-only once the
+         inbound exists, which is what left an existing inbound with no way to turn
+         vision on at all. -->
+    <a-form-item>
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title">
+                    <span v-if="!RESELLER.isReseller || RESELLER.unlimited">0 {{ i18n "pages.inbounds.meansNoLimit" }}</span>
+                    <span v-else>{{ i18n "pages.resellers.minCreateGbDesc" }}</span>
+                </template>
+                {{ i18n "pages.inbounds.totalFlow" }}
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
+        </template>
+        <!-- A reseller selling out of a limited balance may not create an
+             unlimited account, so their floor is their own minimum rather than
+             0. This is the message, not the control: ResellerService.Quote
+             refuses it again server-side. -->
+        <a-input-number
+            v-model.number="client._totalGB"
+            :min="RESELLER.isReseller && !RESELLER.unlimited ? Math.max(1, RESELLER.minCreateGb) : 0"
+        ></a-input-number>
+    </a-form-item>
+    <a-form-item v-if="isEdit && clientStats" label='{{ i18n "usage" }}'>
+        <a-tag
+            :color="ColorUtils.clientUsageColor(clientStats, app.trafficDiff)"
+        >
+            [[ SizeFormatter.sizeFormat(clientStats.up) ]] / [[
+            SizeFormatter.sizeFormat(clientStats.down) ]] ([[
+            SizeFormatter.sizeFormat(clientStats.up + clientStats.down) ]])
+        </a-tag>
+        <a-tooltip>
+            <template slot="title"
+                >{{ i18n "pages.inbounds.resetTraffic" }}</template
+            >
+            <!-- Shown to a reseller too, but it is not free for them: zeroing
+                 the counters lets the account move those bytes again, so the
+                 reset is CHARGED to their balance (ResellerService
+                 PrepareClientReset). The route prices it and refuses when they
+                 cannot afford it, naming the shortfall. -->
+            <a-icon
+                type="retweet"
+                @click="resetClientTraffic(client.email,clientStats.inboundId,$event.target)"
+                v-if="client.email.length > 0"
+            ></a-icon>
+        </a-tooltip>
+    </a-form-item>
+    <!-- Days-per-GB makes the duration a function of the traffic, so a reseller
+         on that plan gets no expiry control at all: the backend overwrites
+         whatever is posted (ResellerService.forcedExpiry). Showing the fields
+         would only invite an edit that silently does nothing. -->
+    <a-form-item v-if="resellerForcedDays" label='{{ i18n "pages.resellers.daysPerGb" }}'>
+        <a-tag color="blue">[[ resellerForcedDaysText ]]</a-tag>
+    </a-form-item>
+    <a-form-item v-if="!resellerForcedDays" label='{{ i18n "pages.client.delayedStart" }}'>
+        <a-switch
+            v-model="delayedStart"
+            @click="client._expiryTime=0"
+        ></a-switch>
+    </a-form-item>
+    <a-form-item
+        v-if="delayedStart && !resellerForcedDays"
+        label='{{ i18n "pages.client.expireDays" }}'
+    >
+        <a-input-number
+            v-model.number="delayedExpireDays"
+            :min="0"
+        ></a-input-number>
+    </a-form-item>
+    <a-form-item v-else-if="!resellerForcedDays">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title"
+                    >{{ i18n "pages.inbounds.leaveBlankToNeverExpire"
+                    }}</template
+                >
+                {{ i18n "pages.inbounds.expireDate" }}
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
+        </template>
+        <a-date-picker
+            v-if="datepicker == 'gregorian'"
+            :show-time="{ format: 'HH:mm:ss' }"
+            format="YYYY-MM-DD HH:mm:ss"
+            :dropdown-class-name="themeSwitcher.currentTheme"
+            v-model="client._expiryTime"
+        ></a-date-picker>
+        <a-persian-datepicker
+            v-else
+            placeholder='{{ i18n "pages.settings.datepickerPlaceholder" }}'
+            value="client._expiryTime"
+            v-model="client._expiryTime"
+        ></a-persian-datepicker>
+        <a-tag color="red" v-if="isEdit && isExpiry">Expired</a-tag>
+    </a-form-item>
+    <a-form-item v-if="client.expiryTime != 0">
+        <template slot="label">
+            <a-tooltip>
+                <template slot="title"
+                    >{{ i18n "pages.client.renewDesc" }}</template
+                >
+                {{ i18n "pages.client.renew" }}
+                <a-icon type="question-circle"></a-icon>
+            </a-tooltip>
+        </template>
+        <a-input-number v-model.number="client.reset" :min="0"></a-input-number>
+    </a-form-item>
+
+    <!-- An inbound-membership checklist used to sit here, for the form's other
+         host: the Clients page's edit modal. That modal is gone and memberships are
+         picked on the Clients page's own account form now
+         (modals/client_membership_modal.html), which is account-shaped rather than
+         inbound-shaped. What is left renders inside the INBOUND modal only, where
+         there is nothing to be a member of yet: the inbound is still being written
+         and has no id. -->
+
+    <!-- GRE: the account's peer routers. Per CLIENT because each customer site has its
+         own public address, and that address IS how the server tells peers apart (GRE
+         carries no credentials and has no handshake to identify anyone by). -->
+    <template v-if="inbound.protocol === Protocols.GRE">
+        <a-divider></a-divider>
+        <a-form-item v-for="pi in grePeerCount(inbound)" :key="'grepeer-' + pi">
+            <template slot="label">
+                <a-tooltip>
+                    <template slot="title">
+                        The public IP of this customer's router (its WAN address). Blank =
+                        dynamic, served by the shared tunnel.
+                    </template>
+                    Peer [[ pi ]] IP
+                    <a-icon type="question-circle"></a-icon>
+                </a-tooltip>
+            </template>
+            <a-input
+                :value="grePeerField(client, pi - 1, 'peerIp')"
+                @change="e => greSetPeerField(client, pi - 1, 'peerIp', e.target.value)"
+                placeholder="blank = dynamic address"
+            ></a-input>
+            <a-input
+                :value="grePeerField(client, pi - 1, 'remark')"
+                @change="e => greSetPeerField(client, pi - 1, 'remark', e.target.value)"
+                placeholder="label (optional), e.g. branch office"
+                :style="{ marginTop: '4px' }"
+            ></a-input>
+        </a-form-item>
+    </template>
+
+    <!-- MTProto Proxy: the ONE per-account setting left. Connection modes, the FakeTLS
+         domain, the ad tag and the device cap all belong to the inbound now (see
+         form/protocol/mtproto.html), because the proxy applies them process-wide
+         however they are stored. External Proxy is genuinely per account: it only
+         picks which relay endpoint this account's links advertise. -->
+    <template v-if="inbound.protocol === Protocols.MTPROTO">
+        <div class="bo-if-sub">MTProto Proxy</div>
+
+        <a-form-item>
+            <template slot="label">
+                <a-tooltip>
+                    <template slot="title">
+                        Hand out links pointing at a relay/CDN host:port instead of this
+                        server's own address. Affects this account's links only; the proxy
+                        itself is unchanged. Set here it REPLACES the inbound's own
+                        External Proxy for this account; leave it off to use that.
+                    </template>
+                    External Proxy
+                    <a-icon type="question-circle"></a-icon>
+                </a-tooltip>
+            </template>
+            <a-switch
+                :checked="Array.isArray(client.externalProxy) && client.externalProxy.length > 0"
+                @change="v => client.externalProxy = v ? [{ dest: window.location.hostname, port: inbound.port, remark: '' }] : []"
+            ></a-switch>
+            <a-button
+                icon="plus"
+                v-if="Array.isArray(client.externalProxy) && client.externalProxy.length > 0"
+                type="primary"
+                size="small"
+                :style="{ marginLeft: '10px' }"
+                @click="client.externalProxy.push({ dest: '', port: inbound.port, remark: '' })"
+            ></a-button>
+        </a-form-item>
+
+        <!--
+            Rows sit OUTSIDE a-form-item on purpose: this form is label-col 8 /
+            wrapper-col 14, so a labelled row would squeeze three controls into 14/24
+            of the modal. Mirrors form/stream/external_proxy.html, including the minus
+            button in addonAfter: a bare a-button is not a valid a-input-group compact
+            child in antd-vue 1.7.8 and renders at the wrong height, unaligned.
+        -->
+        <a-input-group
+            compact
+            :style="{ margin: '8px 0' }"
+            v-for="(row, index) in (client.externalProxy || [])"
+            :key="index"
+        >
+            <a-input
+                :style="{ width: '40%' }"
+                v-model.trim="row.dest"
+                placeholder='{{ i18n "host" }}'
+            ></a-input>
+            <a-tooltip title='{{ i18n "pages.inbounds.port" }}'>
+                <a-input-number
+                    :style="{ width: '20%' }"
+                    v-model.number="row.port"
+                    min="1"
+                    max="65535"
+                ></a-input-number>
+            </a-tooltip>
+            <a-input
+                :style="{ width: '35%', top: '0' }"
+                v-model.trim="row.remark"
+                placeholder='{{ i18n "remark" }}'
+            >
+                <template slot="addonAfter">
+                    <a-button
+                        icon="minus"
+                        size="small"
+                        @click="client.externalProxy.splice(index, 1)"
+                    ></a-button>
+                </template>
+            </a-input>
+        </a-input-group>
+    </template>
+</a-form>
+{{end}}

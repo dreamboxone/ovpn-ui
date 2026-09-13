@@ -1,0 +1,123 @@
+// Package websocket provides WebSocket hub for real-time updates and notifications.
+package websocket
+
+import (
+	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/web/global"
+)
+
+// GetHub returns the global WebSocket hub instance
+func GetHub() *Hub {
+	webServer := global.GetWebServer()
+	if webServer == nil {
+		return nil
+	}
+	hub := webServer.GetWSHub()
+	if hub == nil {
+		return nil
+	}
+	wsHub, ok := hub.(*Hub)
+	if !ok {
+		logger.Warning("WebSocket hub type assertion failed")
+		return nil
+	}
+	return wsHub
+}
+
+// HasClients returns true if there are any WebSocket clients connected.
+// Use this to skip expensive work (DB queries, serialization) when no browser is open.
+func HasClients() bool {
+	hub := GetHub()
+	if hub == nil {
+		return false
+	}
+	return hub.GetClientCount() > 0
+}
+
+// BroadcastStatus broadcasts server status update to all connected clients
+func BroadcastStatus(status any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.Broadcast(MessageTypeStatus, status)
+	}
+}
+
+// BroadcastTraffic broadcasts traffic statistics update to all connected clients
+func BroadcastTraffic(traffic any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.Broadcast(MessageTypeTraffic, traffic)
+	}
+}
+
+// BroadcastInbounds broadcasts inbounds list update to all connected clients
+func BroadcastInbounds(inbounds any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.Broadcast(MessageTypeInbounds, inbounds)
+	}
+}
+
+// BroadcastOutbounds broadcasts outbounds list update to all connected clients
+func BroadcastOutbounds(outbounds any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.Broadcast(MessageTypeOutbounds, outbounds)
+	}
+}
+
+// BroadcastNotification broadcasts a system notification to all connected clients
+func BroadcastNotification(title, message, level string) {
+	hub := GetHub()
+	if hub != nil {
+		notification := map[string]string{
+			"title":   title,
+			"message": message,
+			"level":   level, // info, warning, error, success
+		}
+		hub.Broadcast(MessageTypeNotification, notification)
+	}
+}
+
+// BroadcastXrayState broadcasts Xray state change to all connected clients
+func BroadcastXrayState(state string, errorMsg string) {
+	hub := GetHub()
+	if hub != nil {
+		stateUpdate := map[string]string{
+			"state":    state,
+			"errorMsg": errorMsg,
+		}
+		hub.Broadcast(MessageTypeXrayState, stateUpdate)
+	}
+}
+
+// BroadcastInvalidate sends a lightweight invalidate signal for the given data type,
+// telling connected frontends to re-fetch data via REST API.
+// Use this instead of BroadcastInbounds/BroadcastOutbounds when you know the payload
+// will be too large, to avoid wasting resources on serialization.
+func BroadcastInvalidate(dataType MessageType) {
+	hub := GetHub()
+	if hub != nil {
+		hub.broadcastInvalidate(dataType)
+	}
+}
+
+// BroadcastInboundsToUser sends an inbounds list to one admin's sockets only.
+// Inbounds are per-admin, so BroadcastInbounds (which reaches every connected
+// browser) is wrong for any list built by GetInbounds(userId).
+func BroadcastInboundsToUser(userId int, inbounds any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.BroadcastToUser(userId, MessageTypeInbounds, inbounds)
+	}
+}
+
+// BroadcastTrafficToUser sends a traffic update to one admin's sockets only.
+// Traffic names clients, so it is per-admin data: BroadcastTraffic reaches every
+// connected browser and must not carry it.
+func BroadcastTrafficToUser(userId int, traffic any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.BroadcastToUser(userId, MessageTypeTraffic, traffic)
+	}
+}

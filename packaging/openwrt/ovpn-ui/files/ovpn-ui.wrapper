@@ -1,0 +1,44 @@
+#!/bin/sh
+# /usr/bin/ovpn-ui — run the panel's CLI against the same database the service uses.
+#
+#   ovpn-ui info                          login, URL and state
+#   ovpn-ui --user admin --pass NEW       change the login (service is restarted)
+#   ovpn-ui --port 8443 --path secret     change where the panel listens
+#   ovpn-ui setting -show                 every stored setting
+#
+# The service itself is managed with /etc/init.d/ovpn-ui {start|stop|restart|enable|disable}.
+
+. /usr/lib/ovpn-ui/env.sh
+ovpn_ui_load_env
+
+BIN=/usr/lib/ovpn-ui/ovpn-ui
+SERVICE=/etc/init.d/ovpn-ui
+
+mkdir -p "$VPNUI_DB_FOLDER" "$VPNUI_BIN_FOLDER" "$VPNUI_LOG_FOLDER"
+chmod 0700 "$VPNUI_DB_FOLDER"
+
+case "${1:-}" in
+	""|run)
+		echo "The panel runs as a service: $SERVICE start" >&2
+		exit 1
+		;;
+	--uninstall|uninstall|update|--systemd|systemd|install-menu)
+		# These drive systemd, distro package managers and host-wide cleanup written
+		# for a VPS. On a router they would hit firewall4 and the UCI config.
+		echo "'$1' is not available on OpenWrt. Use: apk del ovpn-ui" >&2
+		exit 1
+		;;
+	-v|--version|-h|--help|help|info|ctl)
+		exec "$BIN" "$@"
+		;;
+esac
+
+# Everything else writes settings. The panel reads them at start, so stop it first
+# and start it again afterwards, which is what the CLI does itself under systemd.
+running=0
+"$SERVICE" running >/dev/null 2>&1 && running=1
+[ "$running" = 1 ] && "$SERVICE" stop
+"$BIN" "$@"
+rc=$?
+[ "$running" = 1 ] && "$SERVICE" start
+exit $rc

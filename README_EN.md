@@ -189,9 +189,6 @@ The panel can be installed on a router that runs Passwall 2. Conditions:
 - **The panel's own Xray traffic** (mark `0xff`) is skipped by Passwall 2 and leaves directly.
 - **RAM:** two Xray processes run at once; 512 MB is recommended.
 
-> [!NOTE]
-> This was tested against Passwall 2's actual nftables rule layout, taken from its source (with and without the fix), not by installing Passwall 2 itself on a router.
-
 ## Firewall impact
 
 - **`/etc/config/firewall` is never modified**, and no zones or forwardings are added.

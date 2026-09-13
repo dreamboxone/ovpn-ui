@@ -90,7 +90,7 @@ jobs:
           name: binary-${{ matrix.goarch }}
           path: build/out/openwrt
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: sdk.tar.zst
           key: openwrt-sdk-x86-64-${{ env.OPENWRT_VERSION }}

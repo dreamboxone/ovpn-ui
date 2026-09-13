@@ -55,7 +55,7 @@ jobs:
       - name: Build static binary
         run: bash packaging/openwrt/build-binary.sh ${{ matrix.goarch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.goarch }}
           path: build/out/openwrt/ovpn-ui-${{ matrix.goarch }}
@@ -111,7 +111,7 @@ jobs:
           chmod 0755 build/out/openwrt/ovpn-ui-*
           bash packaging/openwrt/make-apk.sh "$RUNNER_TEMP/sdk" ${{ matrix.goarch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: apk-${{ matrix.pkgarch }}
           path: build/out/openwrt/dist/ovpn-ui-${{ matrix.pkgarch }}.apk
@@ -134,7 +134,7 @@ jobs:
           cp packaging/openwrt/install.sh dist/install.sh
           cd dist && sha256sum ovpn-ui-*.apk > sha256sums && cat sha256sums
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: openwrt-packages
           path: dist/*
